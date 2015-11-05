@@ -18,6 +18,7 @@ class Firewall:
         geoipdb = open('geoipdb.txt', 'r')
         # TODO: Load the GeoIP DB ('geoipdb.txt') as well.
         # TODO: Also do some initialization if needed.
+        types = {17:'UDP', 1:"ICMP", 6:"TCP"}
         
         rules_dict = {
                 'UDP' : [],
@@ -34,8 +35,20 @@ class Firewall:
     # @pkt_dir: either PKT_DIR_INCOMING or PKT_DIR_OUTGOING
     # @pkt: the actual data of the IPv4 packet (including IP header)
     def handle_packet(self, pkt_dir, pkt):
-        # TODO: Your main firewall code will be here.
-        pass
+        src_ip = pkt[12:16]
+        dst_ip = pkt[16:20]
+        pkt_type = pkt[9:10]
+        transport_header_offset = pkt[0]&15
+        dst_port = pkt[transport_header_offset +2:transport_header_offset +4]
+        ipid, = struct.unpack('!H', pkt[4:6])    # IP identifier (big endian)
+        print '%s len=%4dB, IPID=%5d  %15s -> %15s' % (dir_str, len(pkt), ipid, socket.inet_ntoa(src_ip), socket.inet_ntoa(dst_ip))
+        if pkt_dir == PKT_DIR_INCOMING:
+            dir_str = 'incoming'
+        else:
+            dir_str = 'outgoing'
+        
+        if pkt_type == 17 and : 
+      
 
     # TODO: You can add more methods as you want.
 
