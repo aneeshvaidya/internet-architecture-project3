@@ -14,10 +14,23 @@ class Firewall:
         # TODO: Load the firewall rules (from rule_filename) here.
         print 'I am supposed to load rules from %s, but I am feeling lazy.' % \
                 config['rule']
-
+        rules = open(config['rule'], 'r')
+        geoipdb = open('geoipdb.txt', 'r')
         # TODO: Load the GeoIP DB ('geoipdb.txt') as well.
         # TODO: Also do some initialization if needed.
-
+        
+        rules_dict = {
+                'UDP' : [],
+                'TCP' : [], 
+                'ICMP': [],
+                'DNS' : []
+        }
+        rule = rules.readline()
+        while rule:
+            rule = rule.split()
+            rules_dict[rule[1]].append(rule)
+            rule = rules.readline()
+    
     # @pkt_dir: either PKT_DIR_INCOMING or PKT_DIR_OUTGOING
     # @pkt: the actual data of the IPv4 packet (including IP header)
     def handle_packet(self, pkt_dir, pkt):
