@@ -26,7 +26,7 @@ class Firewall:
             geo_line = geoipdb.readline()
 
         # TODO: Also do some initialization if needed.
-        types = {17:'UDP', 1:"ICMP", 6:"TCP"}
+        self.types = {17:'UDP', 1:"ICMP", 6:"TCP"}
         
         # Load the firewall rules (from rule_filename) here.
         rules = open(config['rule'], 'r')        
@@ -36,17 +36,18 @@ class Firewall:
             if rule[0] == 'pass' or rule[0] == 'drop':
                 self.rules_dict[upper(rule[1])].append(rule)
             rule = rules.readline()
+            
     
     # @pkt_dir: either PKT_DIR_INCOMING or PKT_DIR_OUTGOING
     # @pkt: the actual data of the IPv4 packet (including IP header)
     def handle_packet(self, pkt_dir, pkt):
         src_ip = pkt[12:16]
         dst_ip = pkt[16:20]
-        pkt_type = pkt[9:10]
+
         transport_header_offset = pkt[0]&15
         dst_port = pkt[transport_header_offset +2 : transport_header_offset +4]
         src_port = pkt[transport_header_offset : transport_header_offset +2]
-        ipid, = struct.unpack('!H', pkt[4:6])    # IP identifier (big endian)
+        ipid, = struct.unpack('!H', pkt[4:6])       # IP identifier (big endian)
 
         if pkt_dir == PKT_DIR_INCOMING:
             dir_str = 'incoming'
@@ -58,20 +59,20 @@ class Firewall:
             ext_port = dst_port
         print '%s len=%4dB, IPID=%5d  %15s -> %15s' % (dir_str, len(pkt), ipid, socket.inet_ntoa(src_ip), socket.inet_ntoa(dst_ip))
         
-        if pkt_type == '17' and dst_port == '53':
+        p_type = pkt[9:10]                          # what protocol use for rules check?
+        if pkt_type == '17' and dst_port == '53':  
             protocol = 'DNS'
         else:
-            protocol = types[int(pkt_type)]
+            protocol = self.types[int(p_type)]
             
-        last_verdict = 'pass'
+        last_verdict = 'pass'                       # check rules
         for rule in self.rules_dict[protocol]:
         
             v = apply_rule(rule, ext_addr, ext_port);
             if v:
                 last_verdict = v;
             
-        if last_verdict == 'pass':
-            # ... and simply allow the packet.
+        if last_verdict == 'pass':                  # allow the packet.
             if pkt_dir == PKT_DIR_INCOMING:
                 self.iface_int.send_ip_packet(pkt)
             elif pkt_dir == PKT_DIR_OUTGOING:
@@ -106,7 +107,7 @@ class Firewall:
         
         return False
         
-    def check_port(p, r):   #check if port satisfy rule, both args in string format
+    def check_port(p, r):       #check if port satisfy rule, both args in string format
         if r == 'any' or a == r:
             return True
         if '-' in r:                                        #subnet
