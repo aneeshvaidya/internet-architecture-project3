@@ -23,11 +23,13 @@ class Firewall:
         while geo_line:
             geo_line = geo_line.split()
             country_code = geo_line[2].upper()
-            if country_code in self.geo_dict.keys(): #why?
+            if country_code in self.geo_dict.keys(): 
                 self.geo_dict[country_code].append([geo_line[0],geo_line[1]])
             else:
                 self.geo_dict[country_code]=[[geo_line[0],geo_line[1]]]
             geo_line = geoipdb.readline()
+        
+        #print self.geo_dict['MD']
 
         # TODO: Also do some initialization if needed.
         self.types = {17:'UDP', 1:"ICMP", 6:"TCP"}
@@ -69,41 +71,73 @@ class Firewall:
             dir_str = 'incoming'
             ext_addr = src_ip
             ext_port = src_port
-        else:
+            self.send_interface = self.iface_int
+        elif pkt_dir == PKT_DIR_OUTGOING:
             dir_str = 'outgoing'
             ext_addr = dst_ip
             ext_port = dst_port
-
-        print '%d packet: %s len=%4dB, IPID=%5d port=%s  %15s -> %15s' % (pkt_type, dir_str, len(pkt), ipid, ext_port, src_ip, dst_ip)
-        
-        #Logic for transport protocol
-        
-        if pkt_type == UDP and dst_port == '53':  
-            DNS_flag = True
-            protocol = 'DNS'
+            self.send_interface = self.iface_ext
         else:
+            return
+
+        print '%s packet: %s len=%4dB, IPID=%5d port=%s  %15s -> %15s' % (self.types[pkt_type], dir_str, len(pkt), ipid, ext_port, src_ip, dst_ip)
+        
+        #Thus you should always pass nonTCP/UDP/ICMP packets
+        if pkt_type in self.types.keys():
             protocol = self.types[pkt_type]
-            
-        last_verdict = ''                       # check rules
+        else:
+            self.send_interface.send_ip_packet(pkt)  
+      
+        last_verdict = 'pass'                       # check rules w/o DNS
         for rule in self.rules_dict[protocol]:
             print rule
-            print ext_addr
-            print ext_port
+            print "ext_addr " + str(ext_addr) + " port " + str(ext_port)
             v = self.apply_rule(rule, ext_addr, ext_port);
+            print "This verdict  " + str(v)
             if v:
                 last_verdict = v;
+                
+        if pkt_type == UDP and dst_port == '53':                #DNS querry
+            dns_pkt_offset = transport_header_offset + 8
+            qdcount = pkt[dns_pkt_offset +4 : dns_pkt_offset +6]
+            qdcount, = struct.unpack('!H', qdcount)
+            if qdcount == 1:                                    # only one question
+                querry_offset = dns_pkt_offset + 12
+                dns_pkt = pkt[querry_offset : ]
+                rr_type_offset = dns_pkt.index('\0')
+                qtype = dns_pkt[rr_type_offset : rr_type_offset + 2]
+                qtype, = struct.unpack('!H', qtype)
+                qclass = dns_pkt[rr_type_offset +2 : rr_type_offset +4]
+                qclass, = struct.unpack('!H', qclass)
+                if (qtype == 1 or qtype == 28) and qclass == 1:
+                    DNS_flag = True
+                    #protocol = 'DNS'
+                    qname = dns_pkt[ : rr_type_offset ]
+                    qname = self.parse_name(qname)
+                    for dns_rule in self.rules_dict["DNS"]:
+                    
+                    #================================
+                    
+                    # Please finish (split rule by '.' and compare with qnames)
+                    
+                    #=================================
             
+        
+        
+        
+        
+        
+        
+        
         if last_verdict == 'pass':                  # allow the packet.
-            if pkt_dir == PKT_DIR_INCOMING:
-                self.iface_int.send_ip_packet(pkt)
-            elif pkt_dir == PKT_DIR_OUTGOING:
-                self.iface_ext.send_ip_packet(pkt)        
+                self.send_interface.send_ip_packet(pkt)
+      
             
             
     def apply_rule(self, r, ad, port):
         last_verdict = None
-        print "-----------"
-        print r, ad, port
+        #print "-----------"
+        #print r, ad, port
         if self.check_address(ad, r[2]) and self.check_port(port, r[3]):
                 last_verdict = r[0]
         return last_verdict
@@ -140,6 +174,20 @@ class Firewall:
                 return True
         return False
             
+    #03 77 77 77 06 67 6f 6f 67 6c 65 03 63 6f 6d 00
+    #   w  w  w     g  o  o  g  l  e     c  o  m
+    def parse_name(self, a):
+        ret = []
+        le = a[0]
+        beg = 0
+        while le != 0:
+            ret.append(a[ beg +1 : beg + le +1])
+            beg = beg + le +1
+            le = a[beg]
+        return ret
+                
+      
+
       
 
     # TODO: You can add more methods as you want.
