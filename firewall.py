@@ -26,7 +26,7 @@ class Firewall:
             if country_code in self.geo_dict.keys(): #why?
                 self.geo_dict[country_code].append([geo_line[0],geo_line[1]])
             else:
-                self.geo_dict[country_code]=[geo_line[0],geo_line[1]]
+                self.geo_dict[country_code]=[[geo_line[0],geo_line[1]]]
             geo_line = geoipdb.readline()
 
         # TODO: Also do some initialization if needed.
@@ -118,11 +118,12 @@ class Firewall:
             return addressInNetwork(a, network)
             
         if len(r) == 2:                                      #GeoDB
-            for network in self.geo_dict[r]:
+            for network in self.geo_dict[r.upper()]:
                 low_bound = dottedQuadToNum(network[0])
                 high_bound = dottedQuadToNum(network[1])
                 address = dottedQuadToNum(a)
                 if low_bound < address and address < high_bound:
+                    print "Found a match!"
                     return True
         
         return False
@@ -145,7 +146,7 @@ class Firewall:
 
 def dottedQuadToNum(ip):
     "convert decimal dotted quad string to long integer"
-    return struct.unpack('L',socket.inet_aton(ip))[0]
+    return struct.unpack('!L',socket.inet_aton(ip))[0]
 
 def numToDottedQuad(n):
     "convert long int to dotted quad string"
