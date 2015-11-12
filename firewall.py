@@ -6,6 +6,10 @@ from main import PKT_DIR_INCOMING, PKT_DIR_OUTGOING
 # (http://docs.python.org/2/library/)
 # You must NOT use any 3rd-party libraries.
 
+UDP = 17
+ICMP = 1
+TCP = 6
+
 class Firewall:
     def __init__(self, config, iface_int, iface_ext):
         self.iface_int = iface_int
@@ -18,8 +22,8 @@ class Firewall:
         geo_line = geoipdb.readline()
         while geo_line:
             geo_line = geo_line.split()
-            country_code = upper(geo_line[2])
-            if country_code in geo_dict.keys():
+            country_code = geo_line[2].upper()
+            if country_code in self.geo_dict.keys(): #why?
                 self.geo_dict[country_code].append([geo_line[0],geo_line[1]])
             else:
                 self.geo_dict[country_code]=[geo_line[0],geo_line[1]]
@@ -33,21 +37,33 @@ class Firewall:
         rule = rules.readline()
         while rule:
             rule = rule.split()
-            if rule[0] == 'pass' or rule[0] == 'drop':
-                self.rules_dict[upper(rule[1])].append(rule)
+            if rule:
+                if rule[0] == 'pass' or rule[0] == 'drop':
+                    self.rules_dict[rule[1].upper()].append(rule)
             rule = rules.readline()
             
     
     # @pkt_dir: either PKT_DIR_INCOMING or PKT_DIR_OUTGOING
     # @pkt: the actual data of the IPv4 packet (including IP header)
+    """
+    1) Find out the src and dst IPs
+    2) Determine packet type and extract relevant fields
+    3) Apply all rules, make a verdict
+    """
     def handle_packet(self, pkt_dir, pkt):
-        src_ip = pkt[12:16]
-        dst_ip = pkt[16:20]
+        src_ip = socket.inet_ntoa(pkt[12:16])
+        dst_ip = socket.inet_ntoa(pkt[16:20])
+        pkt_type, = struct.unpack('!B', pkt[9:10])                          # what protocol use for rules check?
 
-        transport_header_offset = pkt[0]&15
-        dst_port = pkt[transport_header_offset +2 : transport_header_offset +4]
+        
+        transport_header_offset = ord(pkt[0]) & 0x0f
+        dst_port = pkt[transport_header_offset + 2 : transport_header_offset +4]
         src_port = pkt[transport_header_offset : transport_header_offset +2]
+        dst_port, = struct.unpack('!H', dst_port)
+        src_port, = struct.unpack('!H', src_port)
+        
         ipid, = struct.unpack('!H', pkt[4:6])       # IP identifier (big endian)
+        DNS_flag = False
 
         if pkt_dir == PKT_DIR_INCOMING:
             dir_str = 'incoming'
@@ -57,18 +73,23 @@ class Firewall:
             dir_str = 'outgoing'
             ext_addr = dst_ip
             ext_port = dst_port
-        print '%s len=%4dB, IPID=%5d  %15s -> %15s' % (dir_str, len(pkt), ipid, socket.inet_ntoa(src_ip), socket.inet_ntoa(dst_ip))
+
+        print '%d packet: %s len=%4dB, IPID=%5d port=%s  %15s -> %15s' % (pkt_type, dir_str, len(pkt), ipid, ext_port, src_ip, dst_ip)
         
-        p_type = pkt[9:10]                          # what protocol use for rules check?
-        if pkt_type == '17' and dst_port == '53':  
+        #Logic for transport protocol
+        
+        if pkt_type == UDP and dst_port == '53':  
+            DNS_flag = True
             protocol = 'DNS'
         else:
-            protocol = self.types[int(p_type)]
+            protocol = self.types[pkt_type]
             
-        last_verdict = 'pass'                       # check rules
+        last_verdict = ''                       # check rules
         for rule in self.rules_dict[protocol]:
-        
-            v = apply_rule(rule, ext_addr, ext_port);
+            print rule
+            print ext_addr
+            print ext_port
+            v = self.apply_rule(rule, ext_addr, ext_port);
             if v:
                 last_verdict = v;
             
@@ -79,21 +100,20 @@ class Firewall:
                 self.iface_ext.send_ip_packet(pkt)        
             
             
-            
-            
-            
-    def apply_rule(r,ad,port):
+    def apply_rule(self, r, ad, port):
         last_verdict = None
-        if check_address(ad, r[2]) and check_port(port, r[3]):
+        print "-----------"
+        print r, ad, port
+        if self.check_address(ad, r[2]) and self.check_port(port, r[3]):
                 last_verdict = r[0]
         return last_verdict
         
         
-    def check_address(a, r):    #check if address satisfy rule, both args in string format
+    def check_address(self, a, r):    #check if address satisfy rule, both args in string format
         if r == 'any' or r == '0.0.0.0/0' or a == r:
             return True
         if '/' in r:                                        #subnet
-            ip,mask = r.split('/')
+            ip, mask = r.split('/')
             network = networkMask(ip,int(mask))
             return addressInNetwork(a, network)
             
@@ -107,17 +127,16 @@ class Firewall:
         
         return False
         
-    def check_port(p, r):       #check if port satisfy rule, both args in string format
-        if r == 'any' or a == r:
+    def check_port(self, p, r):       #check if port satisfy rule, both args in string format
+        if r == 'any' or p == r:
             return True
         if '-' in r:                                        #subnet
-            low_bound, hi_bound = r.split('-')
+            low_bound, high_bound = r.split('-')
             low_bound = int(low_bound)
-            hi_bound = int(hi_bound)
-            port = int(port)
+            high_bound = int(high_bound)
+            port = int(p)
             if low_bound < port and port < high_bound:
                 return True
-        
         return False
             
       
@@ -142,7 +161,7 @@ def networkMask(ip,bits):
 
 def addressInNetwork(ip,net):
    "Is an address in a network"
-   return ip & net == net
+   return dottedQuadToNum(ip) & net == net
 
 
 
