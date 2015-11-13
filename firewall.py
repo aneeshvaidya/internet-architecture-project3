@@ -56,11 +56,11 @@ class Firewall:
         src_ip = socket.inet_ntoa(pkt[12:16])
         dst_ip = socket.inet_ntoa(pkt[16:20])
         pkt_type, = struct.unpack('!B', pkt[9:10])                          # what protocol use for rules check?
-
+        is_dns = False
         
         transport_header_offset = ord(pkt[0]) & 0x0f
-        dst_port = pkt[transport_header_offset + 2 : transport_header_offset +4]
-        src_port = pkt[transport_header_offset : transport_header_offset +2]
+        dst_port = pkt[transport_header_offset*4 + 2 : transport_header_offset*4 +4]
+        src_port = pkt[transport_header_offset*4 : transport_header_offset*4 +2]
         dst_port, = struct.unpack('!H', dst_port)
         src_port, = struct.unpack('!H', src_port)
         
@@ -78,8 +78,10 @@ class Firewall:
             self.send_interface = self.iface_ext
         else:
             return
-
-        print '%s packet: %s len=%4dB, IPID=%5d port=%s  %15s -> %15s' % (self.types[pkt_type], dir_str, len(pkt), ipid, ext_port, src_ip, dst_ip)
+        if pkt_type == UDP and dst_port == 53:
+            print 'Dest port: %s Src port: %s' % (dst_port, src_port)
+            print '%s packet: %s len=%4dB, IPID=%5d port=%s  %15s -> %15s' % (self.types[pkt_type], dir_str, len(pkt), ipid, ext_port, src_ip, dst_ip)
+            is_dns = True
         
         #Thus you should always pass nonTCP/UDP/ICMP packets
         if pkt_type in self.types.keys():
@@ -89,31 +91,36 @@ class Firewall:
       
         last_verdict = 'pass'                       # check rules w/o DNS
         for rule in self.rules_dict[protocol]:
-            print rule
-            print "ext_addr " + str(ext_addr) + " port " + str(ext_port)
+            #print rule
+            #print "ext_addr " + str(ext_addr) + " port " + str(ext_port)
             v = self.apply_rule(rule, ext_addr, ext_port);
-            print "This verdict  " + str(v)
+            #print "This verdict  " + str(v)
             if v:
                 last_verdict = v;
-                
+        if is_dns:        
+            print "Last verdict before DNS check: ", str(last_verdict) 
         #DNS querry        
-        if dir_str = 'outgoing' and last_verdict == 'pass' and pkt_type == UDP and dst_port == '53':    
-            dns_pkt_offset = transport_header_offset + 8
-            qdcount = pkt[dns_pkt_offset +4 : dns_pkt_offset +6]
+        if dir_str == 'outgoing' and last_verdict == 'pass' and pkt_type == UDP and dst_port == 53:    
+            dns_pkt_offset = transport_header_offset*4 + 8
+            qdcount = pkt[dns_pkt_offset + 4: dns_pkt_offset + 6]
             qdcount, = struct.unpack('!H', qdcount)
+            print "qdcount: ", qdcount
             if qdcount == 1:                                    # only one question
                 querry_offset = dns_pkt_offset + 12
                 dns_pkt = pkt[querry_offset : ]
-                rr_type_offset = dns_pkt.index('\0')
+                rr_type_offset = dns_pkt.index('\0') + 1
+                print "qtype offset: ", rr_type_offset
                 qtype = dns_pkt[rr_type_offset : rr_type_offset + 2]
                 qtype, = struct.unpack('!H', qtype)
+                print "qtype: ", qtype
                 qclass = dns_pkt[rr_type_offset +2 : rr_type_offset +4]
                 qclass, = struct.unpack('!H', qclass)
+                print "qclass: ", qclass
                 if (qtype == 1 or qtype == 28) and qclass == 1:
                     qname = dns_pkt[ : rr_type_offset ]
-
                     for dns_rule in self.rules_dict["DNS"]:
                         domains = dns_rule[2].split('.')
+                        print domains
                         if self.compare_domains(qname, domains):
                             last_verdict = dns_rule[0]
         
@@ -167,12 +174,12 @@ class Firewall:
     #   w  w  w     g  o  o  g  l  e     c  o  m
     def parse_name(self, a):
         ret = []
-        le = a[0]
+        le = ord(a[0])
         beg = 0
         while le != 0:
             ret.append(a[ beg +1 : beg + le +1])
             beg = beg + le +1
-            le = a[beg]
+            le = ord(a[beg])
         return ret
         
     
@@ -180,15 +187,19 @@ class Firewall:
     # www.cafe3.peets.com
     # *.peets.com
     def compare_domains(self, qname, domains):
+        print "Comparing domains"
         if len(qname) < len(domains):
             return False
-        a = qname.reverse()
-        r = domains.reverse()
+        a = self.parse_name(qname)
+        r = domains
+        print "query name: ", a
+        print "rules name: ", r
         i = 0
         while i < len(r) and r != '*':
             if a[i] != r[i] and r != '*':
                 return False
             i += 1
+        print "Dropping DNS packet"
         return True
             
       

@@ -19,14 +19,19 @@ class Firewall:
         src_ip = pkt[12:16]
         dst_ip = pkt[16:20]
         ipid, = struct.unpack('!H', pkt[4:6])    # IP identifier (big endian)
+        transport_header_offset = ord(pkt[0]) & 0x0f
+        dst_port = pkt[transport_header_offset*4 + 2 : transport_header_offset*4 +4]
+        src_port = pkt[transport_header_offset*4 : transport_header_offset*4 +2]
+        dst_port, = struct.unpack('!H', dst_port)
+        src_port, = struct.unpack('!H', src_port)
         
         if pkt_dir == PKT_DIR_INCOMING:
             dir_str = 'incoming'
         else:
             dir_str = 'outgoing'
-
-        print '%s len=%4dB, IPID=%5d  %15s -> %15s' % (dir_str, len(pkt), ipid,
-                socket.inet_ntoa(src_ip), socket.inet_ntoa(dst_ip))
+        
+        print '%s len=%4dB, IPID=%5d  %15s -> %15s src_port: %s dst_port: %s' % (dir_str, len(pkt), ipid,
+                socket.inet_ntoa(src_ip), socket.inet_ntoa(dst_ip), src_port, dst_port)
 
         # ... and simply allow the packet.
         if pkt_dir == PKT_DIR_INCOMING:
