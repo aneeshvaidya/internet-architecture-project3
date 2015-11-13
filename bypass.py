@@ -24,12 +24,15 @@ class Firewall:
         src_port = pkt[transport_header_offset*4 : transport_header_offset*4 +2]
         dst_port, = struct.unpack('!H', dst_port)
         src_port, = struct.unpack('!H', src_port)
+        pkt_type, = struct.unpack('!B', pkt[9:10])
+        types = {17:'UDP', 1:"ICMP", 6:"TCP"}
         
         if pkt_dir == PKT_DIR_INCOMING:
             dir_str = 'incoming'
         else:
             dir_str = 'outgoing'
         
+        print 'packet type: %d ' % (types[pkt_type])
         print '%s len=%4dB, IPID=%5d  %15s -> %15s src_port: %s dst_port: %s' % (dir_str, len(pkt), ipid,
                 socket.inet_ntoa(src_ip), socket.inet_ntoa(dst_ip), src_port, dst_port)
 

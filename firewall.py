@@ -81,7 +81,7 @@ class Firewall:
         if pkt_type == UDP and dst_port == 53:
             print 'Dest port: %s Src port: %s' % (dst_port, src_port)
             print '%s packet: %s len=%4dB, IPID=%5d port=%s  %15s -> %15s' % (self.types[pkt_type], dir_str, len(pkt), ipid, ext_port, src_ip, dst_ip)
-            is_dns = True
+            is_dns = True 
         
         #Thus you should always pass nonTCP/UDP/ICMP packets
         if pkt_type in self.types.keys():
@@ -97,30 +97,31 @@ class Firewall:
             #print "This verdict  " + str(v)
             if v:
                 last_verdict = v;
-        if is_dns:        
-            print "Last verdict before DNS check: ", str(last_verdict) 
         #DNS querry        
         if dir_str == 'outgoing' and last_verdict == 'pass' and pkt_type == UDP and dst_port == 53:    
             dns_pkt_offset = transport_header_offset*4 + 8
             qdcount = pkt[dns_pkt_offset + 4: dns_pkt_offset + 6]
             qdcount, = struct.unpack('!H', qdcount)
-            print "qdcount: ", qdcount
+            #print "qdcount: ", qdcount
             if qdcount == 1:                                    # only one question
                 querry_offset = dns_pkt_offset + 12
                 dns_pkt = pkt[querry_offset : ]
                 rr_type_offset = dns_pkt.index('\0') + 1
-                print "qtype offset: ", rr_type_offset
+                #print "qtype offset: ", rr_type_offset
                 qtype = dns_pkt[rr_type_offset : rr_type_offset + 2]
                 qtype, = struct.unpack('!H', qtype)
-                print "qtype: ", qtype
+                #print "qtype: ", qtype
                 qclass = dns_pkt[rr_type_offset +2 : rr_type_offset +4]
                 qclass, = struct.unpack('!H', qclass)
-                print "qclass: ", qclass
+                #print "qclass: ", qclass
                 if (qtype == 1 or qtype == 28) and qclass == 1:
                     qname = dns_pkt[ : rr_type_offset ]
                     for dns_rule in self.rules_dict["DNS"]:
+                        if dns_rule[2] == 'any':
+                            last_verdict = dns_rule[0]
+                            continue
                         domains = dns_rule[2].split('.')
-                        print domains
+                        #print domains
                         if self.compare_domains(qname, domains):
                             last_verdict = dns_rule[0]
         
@@ -153,7 +154,7 @@ class Firewall:
                 high_bound = dottedQuadToNum(network[1])
                 address = dottedQuadToNum(a)
                 if low_bound < address and address < high_bound:
-                    print "Found a match!"
+                    #print "Found a match!"
                     return True
         
         return False
@@ -187,7 +188,7 @@ class Firewall:
     # www.cafe3.peets.com
     # *.peets.com
     def compare_domains(self, qname, domains):
-        print "Comparing domains"
+        #print "Comparing domains"
         if len(qname) < len(domains):
             return False
         a = self.parse_name(qname)
@@ -196,10 +197,10 @@ class Firewall:
         print "rules name: ", r
         i = 0
         while i < len(r) and r != '*':
-            if a[i] != r[i] and r != '*':
+            if a[i] != r[i] and r[i] != '*':
                 return False
             i += 1
-        print "Dropping DNS packet"
+        #print "Dropping DNS packet"
         return True
             
       
