@@ -112,9 +112,9 @@ class Firewall:
                 qclass, = struct.unpack('!H', qclass)
                 #print "qclass: ", qclass
                 if (qtype == 1 or qtype == 28) and qclass == 1:
-                    qname = dns_pkt[ : rr_type_offset ]
+                    qname = dns_pkt[ : rr_type_offset ].lower()
                     is_valid_dns = True
-                    print "valid UDP "
+                    #print "valid UDP "
                     for dns_rule in self.rules_dict["DNS"]:
                         if dns_rule[1] == 'dns':
                             if dns_rule[2] == '*':
@@ -126,8 +126,9 @@ class Firewall:
                                 last_verdict = dns_rule[0]
                         if dns_rule[1] == 'udp': 
                             v = self.apply_rule(dns_rule, ext_addr, ext_port);
+                            #print "Here", v
                             if v:
-                                print "UDP dropping ", v
+                                #print "UDP dropping ", v
                                 last_verdict = v;
                                 
             if is_valid_dns and last_verdict == 'pass':
@@ -156,6 +157,7 @@ class Firewall:
         last_verdict = None
         #print "-----------"
         #print r, ad, port
+        #pdb.set_trace()
         if self.check_address(ad, r[2]) and self.check_port(port, r[3]):
                 last_verdict = r[0]
         return last_verdict
@@ -183,7 +185,7 @@ class Firewall:
         return False
         
     def check_port(self, p, r):       #check if port satisfy rule, both args in string format
-        if r == 'any' or p == r:
+        if r == 'any' or p == int(r):
             return True
         if '-' in r:                                        #subnet
             low_bound, high_bound = r.split('-')
@@ -216,11 +218,11 @@ class Firewall:
             return False
         a = self.parse_name(qname)
         r = domains
-        print "query name: ", a
-        print "rules name: ", r
+        #print "query name: ", a
+        #print "rules name: ", r
         i = 0
         while i < len(r) and r != '*':
-            if a[i].lower() != r[i].lower() and r[i] != '*':
+            if a[i] != r[i] and r[i] != '*':
                 return False
             i += 1
         #print "Dropping DNS packet"
