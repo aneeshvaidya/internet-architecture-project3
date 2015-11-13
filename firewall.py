@@ -22,13 +22,13 @@ class Firewall:
         geo_line = geoipdb.readline()
         while geo_line:
             geo_line = geo_line.split()
-            country_code = geo_line[2].upper()
-            if country_code in self.geo_dict.keys(): 
-                self.geo_dict[country_code].append([geo_line[0],geo_line[1]])
-            else:
-                self.geo_dict[country_code]=[[geo_line[0],geo_line[1]]]
+            if geo_line:
+                country_code = geo_line[2].upper()
+                if country_code in self.geo_dict.keys(): 
+                    self.geo_dict[country_code].append([geo_line[0],geo_line[1]])
+                else:
+                    self.geo_dict[country_code]=[[geo_line[0],geo_line[1]]]
             geo_line = geoipdb.readline()
-        
         #print self.geo_dict['MD']
 
         # TODO: Also do some initialization if needed.
@@ -43,6 +43,7 @@ class Firewall:
                 if rule[0] == 'pass' or rule[0] == 'drop':
                     self.rules_dict[rule[1].upper()].append(rule)
             rule = rules.readline()
+        print self.rules_dict
             
     
     # @pkt_dir: either PKT_DIR_INCOMING or PKT_DIR_OUTGOING
@@ -88,6 +89,7 @@ class Firewall:
             protocol = self.types[pkt_type]
         else:
             self.send_interface.send_ip_packet(pkt)  
+            return
       
         last_verdict = 'pass'                       # check rules w/o DNS
         for rule in self.rules_dict[protocol]:
@@ -149,11 +151,13 @@ class Firewall:
             return addressInNetwork(a, network)
             
         if len(r) == 2:                                      #GeoDB
+            if not self.geo_dict.get(r):
+                return False
             for network in self.geo_dict[r.upper()]:
                 low_bound = dottedQuadToNum(network[0])
                 high_bound = dottedQuadToNum(network[1])
                 address = dottedQuadToNum(a)
-                if low_bound < address and address < high_bound:
+                if low_bound <= address and address <= high_bound:
                     #print "Found a match!"
                     return True
         
@@ -167,7 +171,7 @@ class Firewall:
             low_bound = int(low_bound)
             high_bound = int(high_bound)
             port = int(p)
-            if low_bound < port and port < high_bound:
+            if low_bound <= port and port <= high_bound:
                 return True
         return False
             
@@ -197,7 +201,7 @@ class Firewall:
         print "rules name: ", r
         i = 0
         while i < len(r) and r != '*':
-            if a[i] != r[i] and r[i] != '*':
+            if a[i].lower() != r[i].lower() and r[i] != '*':
                 return False
             i += 1
         #print "Dropping DNS packet"
