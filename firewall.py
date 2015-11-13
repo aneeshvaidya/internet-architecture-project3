@@ -1,10 +1,7 @@
 #!/usr/bin/env python
 import socket,struct
+import pdb
 from main import PKT_DIR_INCOMING, PKT_DIR_OUTGOING
-
-# TODO: Feel free to import any Python standard moduless as necessary.
-# (http://docs.python.org/2/library/)
-# You must NOT use any 3rd-party libraries.
 
 UDP = 17
 ICMP = 1
@@ -17,7 +14,7 @@ class Firewall:
         self.geo_dict = {}          #{"US":[[start,end],[start1, end1],...],"CA"[...]}
         self.rules_dict = {'UDP' : [],'TCP' : [],'ICMP': [],'DNS' : []   }
 
-        # TODO: Load the GeoIP DB ('geoipdb.txt') as well.
+        # Load the GeoIP DB ('geoipdb.txt') as well.
         geoipdb = open('geoipdb.txt', 'r')
         geo_line = geoipdb.readline()
         while geo_line:
@@ -29,23 +26,20 @@ class Firewall:
                 else:
                     self.geo_dict[country_code]=[[geo_line[0],geo_line[1]]]
             geo_line = geoipdb.readline()
-        #print self.geo_dict['MD']
 
-        # TODO: Also do some initialization if needed.
         self.types = {17:'UDP', 1:"ICMP", 6:"TCP"}
         
         # Load the firewall rules (from rule_filename) here.
         rules = open(config['rule'], 'r')        
-        rule = rules.readline().lower()
-        while rule:
-            rule = rule.split()
-            if rule:
-                if rule[0] == 'pass' or rule[0] == 'drop':
-                    self.rules_dict[rule[1].upper()].append(rule)
-                    # applying dirty hack to DNS/UDP order logic
-                    if rule[1].upper() == "UDP":
-                        self.rules_dict["DNS"].append(rule)
-            rule = rules.readline().lower()
+        rule_line = rules.readline()
+        while rule_line:
+            rule_line = rule_line.lower().split()
+            if rule_line and (rule_line[0] == 'pass' or rule_line[0] == 'drop'):
+                self.rules_dict[rule_line[1].upper()].append(rule_line)
+                # hack to DNS/UDP order logic - store UDP rule to DNS rules also
+                if rule_line[1].upper() == "UDP":
+                    self.rules_dict["DNS"].append(rule_line)
+            rule_line = rules.readline()
         print self.rules_dict
             
     
@@ -59,16 +53,16 @@ class Firewall:
     def handle_packet(self, pkt_dir, pkt):
         src_ip = socket.inet_ntoa(pkt[12:16])
         dst_ip = socket.inet_ntoa(pkt[16:20])
-        pkt_type, = struct.unpack('!B', pkt[9:10])                          # what protocol use for rules check?
+        pkt_type, = struct.unpack('!B', pkt[9:10])        #  protocol used for rules check
         
-        transport_header_offset = ord(pkt[0]) & 0x0f
-        dst_port = pkt[transport_header_offset*4 + 2 : transport_header_offset*4 +4]
-        src_port = pkt[transport_header_offset*4 : transport_header_offset*4 +2]
+        transport_header_offset = (ord(pkt[0]) & 0x0f) *4
+        dst_port = pkt[transport_header_offset + 2 : transport_header_offset +4]
+        src_port = pkt[transport_header_offset : transport_header_offset +2]
         dst_port, = struct.unpack('!H', dst_port)
         src_port, = struct.unpack('!H', src_port)
 
         
-        ipid, = struct.unpack('!H', pkt[4:6])       # IP identifier (big endian)
+        ipid, = struct.unpack('!H', pkt[4:6])       # IP identifier (big endian). why do we need it?
 
         if pkt_dir == PKT_DIR_INCOMING:
             dir_str = 'incoming'
@@ -84,12 +78,10 @@ class Firewall:
             return
 
         if pkt_type == ICMP:
-            ext_port = struct.unpack('!B', pkt[transport_header_offset*4])
+            ext_port, = struct.unpack('!B', pkt[transport_header_offset])
 
-        if pkt_type == UDP and dst_port == 53:
-            is_valid_dns = True 
-        print 'Dest port: %s Src port: %s' % (dst_port, src_port)
-        print '%s packet: %s len=%4dB, IPID=%5d port=%s  %15s -> %15s' % (self.types[pkt_type], dir_str, len(pkt), ipid, ext_port, src_ip, dst_ip)
+        print '%s packet: %s len=%4dB, IPID=%5d port=%s  %15s -> %15s' \
+        % (self.types[pkt_type], dir_str, len(pkt), ipid, ext_port, src_ip, dst_ip)
         
         #Thus you should always pass nonTCP/UDP/ICMP packets
         if pkt_type in self.types.keys():
@@ -98,71 +90,57 @@ class Firewall:
             self.send_interface.send_ip_packet(pkt)  
             return
       
-        last_verdict = 'pass'                       
-        #DNS querry        
+        last_verdict = 'pass'
+
+        #DNS packet processing
+        is_valid_dns = False        
         if dir_str == 'outgoing' and pkt_type == UDP and dst_port == 53:    
-            dns_pkt_offset = transport_header_offset*4 + 8
+            dns_pkt_offset = transport_header_offset + 8
             qdcount = pkt[dns_pkt_offset + 4: dns_pkt_offset + 6]
             qdcount, = struct.unpack('!H', qdcount)
-            #print "qdcount: ", qdcount
             if qdcount == 1:                                    # only one question
                 querry_offset = dns_pkt_offset + 12
                 dns_pkt = pkt[querry_offset : ]
                 rr_type_offset = dns_pkt.index('\0') + 1
-                #print "qtype offset: ", rr_type_offset
                 qtype = dns_pkt[rr_type_offset : rr_type_offset + 2]
                 qtype, = struct.unpack('!H', qtype)
-                #print "qtype: ", qtype
                 qclass = dns_pkt[rr_type_offset +2 : rr_type_offset +4]
                 qclass, = struct.unpack('!H', qclass)
-                #print "qclass: ", qclass
                 if (qtype == 1 or qtype == 28) and qclass == 1:
-                    qname = dns_pkt[ : rr_type_offset ].lower()
-                    is_valid_dns = True
-
+                    is_valid_dns = True                
+                    qname = dns_pkt[ : rr_type_offset ]
                     for dns_rule in self.rules_dict["DNS"]:
-                        print dns_rule
+                        #print dns_rule
                         if dns_rule[1] == 'dns':
                             if dns_rule[2] == '*':
                                 last_verdict = dns_rule[0]
                                 continue
-                            domains = dns_rule[2].split('.')
-                            #print domains
-                            if self.compare_domains(qname, domains):
+                            if self.compare_domains(qname, dns_rule[2]):
                                 last_verdict = dns_rule[0]
+                                #print last_verdict
                         if dns_rule[1] == 'udp': 
                             v = self.apply_rule(dns_rule, ext_addr, ext_port);
-                            #print "Here", v
                             if v:
+                                #print v
                                 last_verdict = v;
                                 
             if is_valid_dns and last_verdict == 'pass':
                 self.send_interface.send_ip_packet(pkt)
                 return
-        
-        # check rules no DNS
-        for rule in self.rules_dict[protocol]:
-            #print rule
-            #print "ext_addr " + str(ext_addr) + " port " + str(ext_port)
-            v = self.apply_rule(rule, ext_addr, ext_port);
-            #print "This verdict  " + str(v)
-            if v:
-                last_verdict = v;
-                
 
-                            
-        
-        
+        for rule in self.rules_dict[protocol]:       # check rules no DNS
+            v = self.apply_rule(rule, ext_addr, ext_port);
+            if v:
+                last_verdict = v;                
+
         if last_verdict == 'pass':                  # allow the packet.
                 self.send_interface.send_ip_packet(pkt)
+                return
       
             
             
     def apply_rule(self, r, ad, port):
         last_verdict = None
-        #print "-----------"
-        #print r, ad, port
-        #pdb.set_trace()
         if self.check_address(ad, r[2]) and self.check_port(port, r[3]):
                 last_verdict = r[0]
         return last_verdict
@@ -172,39 +150,37 @@ class Firewall:
         if r == 'any' or r == '0.0.0.0/0' or a == r:
             return True
         if '/' in r:                                        #subnet
-            ip, mask = r.split('/')
-            network = networkMask(ip,int(mask))
-            return addressInNetwork(a, network)
+            return aInNet(a, r)
             
         if len(r) == 2:                                      #GeoDB
-            if not self.geo_dict.get(r.upper()):
+            r = r.upper()
+            if not self.geo_dict.get(r):
                 return False
-            l = self.geo_dict[r.upper()]
-            start = 0
+            l = self.geo_dict[r]
+            start = 0                                      #bin search
             end = len(l) - 1
             while start <= end:
                 middle = (start + end) / 2
-                lower, upper = l[middle]
-                lower, upper = dottedQuadToNum(lower), dottedQuadToNum(upper)
+                lower_bound, upper_bound = l[middle]
+                lower_bound, upper_bound = dottedQuadToNum(lower_bound), dottedQuadToNum(upper_bound)
                 address = dottedQuadToNum(a)
-                if lower <= address and address <= upper:
+                if lower_bound <= address and address <= upper_bound:
                     return True
-                elif address > upper:
+                elif address > upper_bound:
                     start = middle + 1
-                elif address < lower:
+                elif address < lower_bound:
                     end = middle - 1
 
         return False
         
-    def check_port(self, p, r):       #check if port satisfy rule, both args in string format
+    def check_port(self, p, r):       #check if port satisfy rule,  p int, r str
         if '-' in r:                                        #subnet
             low_bound, high_bound = r.split('-')
             low_bound = int(low_bound)
             high_bound = int(high_bound)
-            port = int(p)
-            if low_bound <= port and port <= high_bound:
+            if low_bound <= p and p <= high_bound:
                 return True
-        if r == 'any' or p == int(r):
+        if r == 'any' or p == int(r):      # p and r both strings
             return True
         return False
             
@@ -215,7 +191,7 @@ class Firewall:
         le = ord(a[0])
         beg = 0
         while le != 0:
-            ret.append(a[ beg +1 : beg + le +1])
+            ret.append(a[ beg +1 : beg + le +1].lower())
             beg = beg + le +1
             le = ord(a[beg])
         return ret
@@ -224,12 +200,12 @@ class Firewall:
     
     # www.cafe3.peets.com
     # *.peets.com
+    # qname in dns name format, domains is line from rules file (string)
     def compare_domains(self, qname, domains):
-        #print "Comparing domains"
-        if len(qname) < len(domains):
-            return False
         a = self.parse_name(qname)
-        r = domains
+        r = domains.split('.')
+        if len(a) < len(r):
+            return False
         #print "query name: ", a
         #print "rules name: ", r
         i = 0
@@ -237,36 +213,22 @@ class Firewall:
             if a[i] != r[i] and r[i] != '*':
                 return False
             i += 1
-        #print "Dropping DNS packet"
+
         return True
             
       
 
-      
-
-    # TODO: You can add more methods as you want.
 
 def dottedQuadToNum(ip):
     "convert decimal dotted quad string to long integer"
-    return struct.unpack('!L',socket.inet_aton(ip))[0]
-
-def numToDottedQuad(n):
-    "convert long int to dotted quad string"
-    return socket.inet_ntoa(struct.pack('L',n))
-      
-def makeMask(n):
-    "return a mask of n bits as a long integer"
-    return (2L<<n-1)-1
-    
-def networkMask(ip,bits):
-    "Convert a network address to a long integer" 
-    return dottedQuadToNum(ip) & makeMask(bits)
-
-def addressInNetwork(ip,net):
-   "Is an address in a network"
-   return dottedQuadToNum(ip) & net == net
-
-
+    return struct.unpack('>L',socket.inet_aton(ip))[0]
 
    
-    # TODO: You may want to add more classes/functions as well.
+def aInNet(ip,net):
+    ip = dottedQuadToNum(ip)
+    netaddr,bits = net.split('/')
+    netaddr = dottedQuadToNum(netaddr)
+    # Must shift left an all ones value, /32 = zero shift, /0 = 32 shift left
+    netmask = 0xffffffff << (32-int(bits))
+    return (ip & netmask) == (netaddr & netmask)
+
