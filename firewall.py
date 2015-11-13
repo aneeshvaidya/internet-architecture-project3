@@ -66,6 +66,7 @@ class Firewall:
         src_port = pkt[transport_header_offset*4 : transport_header_offset*4 +2]
         dst_port, = struct.unpack('!H', dst_port)
         src_port, = struct.unpack('!H', src_port)
+
         
         ipid, = struct.unpack('!H', pkt[4:6])       # IP identifier (big endian)
 
@@ -81,6 +82,10 @@ class Firewall:
             self.send_interface = self.iface_ext
         else:
             return
+
+        if pkt_type == ICMP:
+            ext_port = struct.unpack('!B', pkt[transport_header_offset*4])
+
         if pkt_type == UDP and dst_port == 53:
             print 'Dest port: %s Src port: %s' % (dst_port, src_port)
             print '%s packet: %s len=%4dB, IPID=%5d port=%s  %15s -> %15s' % (self.types[pkt_type], dir_str, len(pkt), ipid, ext_port, src_ip, dst_ip)
@@ -114,7 +119,6 @@ class Firewall:
                 if (qtype == 1 or qtype == 28) and qclass == 1:
                     qname = dns_pkt[ : rr_type_offset ]
                     is_valid_dns = True
-                    print "valid UDP "
                     for dns_rule in self.rules_dict["DNS"]:
                         if dns_rule[1] == 'dns':
                             if dns_rule[2] == '*':
@@ -127,7 +131,6 @@ class Firewall:
                         if dns_rule[1] == 'udp': 
                             v = self.apply_rule(dns_rule, ext_addr, ext_port);
                             if v:
-                                print "UDP dropping ", v
                                 last_verdict = v;
                                 
             if is_valid_dns and last_verdict == 'pass':
@@ -170,21 +173,26 @@ class Firewall:
             return addressInNetwork(a, network)
             
         if len(r) == 2:                                      #GeoDB
-            if not self.geo_dict.get(r):
+            if not self.geo_dict.get(r.upper()):
                 return False
-            for network in self.geo_dict[r.upper()]:
-                low_bound = dottedQuadToNum(network[0])
-                high_bound = dottedQuadToNum(network[1])
+            l = self.geo_dict[r.upper()]
+            start = 0
+            end = len(l) - 1
+            while start <= end:
+                middle = (start + end) / 2
+                lower, upper = l[middle]
+                lower, upper = dottedQuadToNum(lower), dottedQuadToNum(upper)
                 address = dottedQuadToNum(a)
-                if low_bound <= address and address <= high_bound:
-                    #print "Found a match!"
+                if lower <= address and address <= upper:
                     return True
-        
+                elif address > upper:
+                    start = middle + 1
+                elif address < lower:
+                    end = middle - 1
+
         return False
         
     def check_port(self, p, r):       #check if port satisfy rule, both args in string format
-        if r == 'any' or p == r:
-            return True
         if '-' in r:                                        #subnet
             low_bound, high_bound = r.split('-')
             low_bound = int(low_bound)
@@ -192,6 +200,8 @@ class Firewall:
             port = int(p)
             if low_bound <= port and port <= high_bound:
                 return True
+        if r == 'any' or p == int(r):
+            return True
         return False
             
     #03 77 77 77 06 67 6f 6f 67 6c 65 03 63 6f 6d 00
