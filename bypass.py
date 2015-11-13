@@ -32,7 +32,6 @@ class Firewall:
         else:
             dir_str = 'outgoing'
         
-        print 'packet type: %d ' % (types[pkt_type])
         print '%s len=%4dB, IPID=%5d  %15s -> %15s src_port: %s dst_port: %s' % (dir_str, len(pkt), ipid,
                 socket.inet_ntoa(src_ip), socket.inet_ntoa(dst_ip), src_port, dst_port)
 
