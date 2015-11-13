@@ -87,9 +87,9 @@ class Firewall:
             ext_port = struct.unpack('!B', pkt[transport_header_offset*4])
 
         if pkt_type == UDP and dst_port == 53:
-            print 'Dest port: %s Src port: %s' % (dst_port, src_port)
-            print '%s packet: %s len=%4dB, IPID=%5d port=%s  %15s -> %15s' % (self.types[pkt_type], dir_str, len(pkt), ipid, ext_port, src_ip, dst_ip)
             is_valid_dns = True 
+        print 'Dest port: %s Src port: %s' % (dst_port, src_port)
+        print '%s packet: %s len=%4dB, IPID=%5d port=%s  %15s -> %15s' % (self.types[pkt_type], dir_str, len(pkt), ipid, ext_port, src_ip, dst_ip)
         
         #Thus you should always pass nonTCP/UDP/ICMP packets
         if pkt_type in self.types.keys():
@@ -121,6 +121,7 @@ class Firewall:
                     is_valid_dns = True
 
                     for dns_rule in self.rules_dict["DNS"]:
+                        print dns_rule
                         if dns_rule[1] == 'dns':
                             if dns_rule[2] == '*':
                                 last_verdict = dns_rule[0]
@@ -196,8 +197,6 @@ class Firewall:
         return False
         
     def check_port(self, p, r):       #check if port satisfy rule, both args in string format
-        if r == 'any' or p == int(r):
-            return True
         if '-' in r:                                        #subnet
             low_bound, high_bound = r.split('-')
             low_bound = int(low_bound)
