@@ -65,7 +65,6 @@ class Firewall:
         src_port, = struct.unpack('!H', src_port)
         
         ipid, = struct.unpack('!H', pkt[4:6])       # IP identifier (big endian)
-        DNS_flag = False
 
         if pkt_dir == PKT_DIR_INCOMING:
             dir_str = 'incoming'
@@ -97,7 +96,8 @@ class Firewall:
             if v:
                 last_verdict = v;
                 
-        if pkt_type == UDP and dst_port == '53':                #DNS querry
+        #DNS querry        
+        if dir_str = 'outgoing' and last_verdict == 'pass' and pkt_type == UDP and dst_port == '53':    
             dns_pkt_offset = transport_header_offset + 8
             qdcount = pkt[dns_pkt_offset +4 : dns_pkt_offset +6]
             qdcount, = struct.unpack('!H', qdcount)
@@ -110,23 +110,12 @@ class Firewall:
                 qclass = dns_pkt[rr_type_offset +2 : rr_type_offset +4]
                 qclass, = struct.unpack('!H', qclass)
                 if (qtype == 1 or qtype == 28) and qclass == 1:
-                    DNS_flag = True
-                    #protocol = 'DNS'
                     qname = dns_pkt[ : rr_type_offset ]
-                    qname = self.parse_name(qname)
+
                     for dns_rule in self.rules_dict["DNS"]:
-                    
-                    #================================
-                    
-                    # Please finish (split rule by '.' and compare with qnames)
-                    
-                    #=================================
-            
-        
-        
-        
-        
-        
+                        domains = dns_rule[2].split('.')
+                        if self.compare_domains(qname, domains):
+                            last_verdict = dns_rule[0]
         
         
         if last_verdict == 'pass':                  # allow the packet.
@@ -185,7 +174,23 @@ class Firewall:
             beg = beg + le +1
             le = a[beg]
         return ret
-                
+        
+    
+    
+    # www.cafe3.peets.com
+    # *.peets.com
+    def compare_domains(self, qname, domains):
+        if len(qname) < len(domains):
+            return False
+        a = qname.reverse()
+        r = domains.reverse()
+        i = 0
+        while i < len(r) and r != '*':
+            if a[i] != r[i] and r != '*':
+                return False
+            i += 1
+        return True
+            
       
 
       
