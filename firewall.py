@@ -36,13 +36,16 @@ class Firewall:
         
         # Load the firewall rules (from rule_filename) here.
         rules = open(config['rule'], 'r')        
-        rule = rules.readline()
+        rule = rules.readline().lower()
         while rule:
             rule = rule.split()
             if rule:
                 if rule[0] == 'pass' or rule[0] == 'drop':
                     self.rules_dict[rule[1].upper()].append(rule)
-            rule = rules.readline()
+                    # applying dirty hack to DNS/UDP order logic
+                    if rule[1].upper() == "UDP":
+                        self.rules_dict["DNS"].append(rule)
+            rule = rules.readline().lower()
         print self.rules_dict
             
     
@@ -57,7 +60,6 @@ class Firewall:
         src_ip = socket.inet_ntoa(pkt[12:16])
         dst_ip = socket.inet_ntoa(pkt[16:20])
         pkt_type, = struct.unpack('!B', pkt[9:10])                          # what protocol use for rules check?
-        is_dns = False
         
         transport_header_offset = ord(pkt[0]) & 0x0f
         dst_port = pkt[transport_header_offset*4 + 2 : transport_header_offset*4 +4]
@@ -82,7 +84,7 @@ class Firewall:
         if pkt_type == UDP and dst_port == 53:
             print 'Dest port: %s Src port: %s' % (dst_port, src_port)
             print '%s packet: %s len=%4dB, IPID=%5d port=%s  %15s -> %15s' % (self.types[pkt_type], dir_str, len(pkt), ipid, ext_port, src_ip, dst_ip)
-            is_dns = True 
+            is_valid_dns = True 
         
         #Thus you should always pass nonTCP/UDP/ICMP packets
         if pkt_type in self.types.keys():
@@ -91,16 +93,9 @@ class Firewall:
             self.send_interface.send_ip_packet(pkt)  
             return
       
-        last_verdict = 'pass'                       # check rules w/o DNS
-        for rule in self.rules_dict[protocol]:
-            #print rule
-            #print "ext_addr " + str(ext_addr) + " port " + str(ext_port)
-            v = self.apply_rule(rule, ext_addr, ext_port);
-            #print "This verdict  " + str(v)
-            if v:
-                last_verdict = v;
+        last_verdict = 'pass'                       
         #DNS querry        
-        if dir_str == 'outgoing' and last_verdict == 'pass' and pkt_type == UDP and dst_port == 53:    
+        if dir_str == 'outgoing' and pkt_type == UDP and dst_port == 53:    
             dns_pkt_offset = transport_header_offset*4 + 8
             qdcount = pkt[dns_pkt_offset + 4: dns_pkt_offset + 6]
             qdcount, = struct.unpack('!H', qdcount)
@@ -118,14 +113,38 @@ class Firewall:
                 #print "qclass: ", qclass
                 if (qtype == 1 or qtype == 28) and qclass == 1:
                     qname = dns_pkt[ : rr_type_offset ]
+                    is_valid_dns = True
+                    print "valid UDP "
                     for dns_rule in self.rules_dict["DNS"]:
-                        if dns_rule[2] == 'any':
-                            last_verdict = dns_rule[0]
-                            continue
-                        domains = dns_rule[2].split('.')
-                        #print domains
-                        if self.compare_domains(qname, domains):
-                            last_verdict = dns_rule[0]
+                        if dns_rule[1] == 'dns':
+                            if dns_rule[2] == '*':
+                                last_verdict = dns_rule[0]
+                                continue
+                            domains = dns_rule[2].split('.')
+                            #print domains
+                            if self.compare_domains(qname, domains):
+                                last_verdict = dns_rule[0]
+                        if dns_rule[1] == 'udp': 
+                            v = self.apply_rule(dns_rule, ext_addr, ext_port);
+                            if v:
+                                print "UDP dropping ", v
+                                last_verdict = v;
+                                
+            if is_valid_dns and last_verdict == 'pass':
+                self.send_interface.send_ip_packet(pkt)
+                return
+        
+        # check rules no DNS
+        for rule in self.rules_dict[protocol]:
+            #print rule
+            #print "ext_addr " + str(ext_addr) + " port " + str(ext_port)
+            v = self.apply_rule(rule, ext_addr, ext_port);
+            #print "This verdict  " + str(v)
+            if v:
+                last_verdict = v;
+                
+
+                            
         
         
         if last_verdict == 'pass':                  # allow the packet.
