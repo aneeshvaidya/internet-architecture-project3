@@ -15,7 +15,7 @@ class Firewall:
         self.rules_dict = {'UDP' : [],'TCP' : [],'ICMP': [],'DNS' : []   }
 
         # Load the GeoIP DB ('geoipdb.txt') as well.
-        geoipdb = open('geoipdb.txt', 'r')
+        geoipdb = open('g.txt', 'r')
         geo_line = geoipdb.readline()
         while geo_line:
             geo_line = geo_line.split()
@@ -127,7 +127,7 @@ class Firewall:
             if is_valid_dns and last_verdict == 'pass':
                 self.send_interface.send_ip_packet(pkt)
                 return
-
+                
         for rule in self.rules_dict[protocol]:       # check rules no DNS
             v = self.apply_rule(rule, ext_addr, ext_port);
             if v:
@@ -174,13 +174,16 @@ class Firewall:
         return False
         
     def check_port(self, p, r):       #check if port satisfy rule,  p int, r str
+ 
         if '-' in r:                                        #subnet
             low_bound, high_bound = r.split('-')
             low_bound = int(low_bound)
             high_bound = int(high_bound)
             if low_bound <= p and p <= high_bound:
                 return True
-        if r == 'any' or p == int(r):      # p and r both strings
+            else:
+                return False
+        if r == 'any' or p == int(r):     
             return True
         return False
             
