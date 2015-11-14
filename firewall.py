@@ -15,7 +15,7 @@ class Firewall:
         self.rules_dict = {'UDP' : [],'TCP' : [],'ICMP': [],'DNS' : []   }
 
         # Load the GeoIP DB ('geoipdb.txt') as well.
-        geoipdb = open('g.txt', 'r')
+        geoipdb = open('geoipdb.txt', 'r')
         geo_line = geoipdb.readline()
         while geo_line:
             geo_line = geo_line.split()
@@ -80,8 +80,8 @@ class Firewall:
         if pkt_type == ICMP:
             ext_port, = struct.unpack('!B', pkt[transport_header_offset])
 
-        print '%s packet: %s len=%4dB, IPID=%5d port=%s  %15s -> %15s' \
-        % (self.types[pkt_type], dir_str, len(pkt), ipid, ext_port, src_ip, dst_ip)
+        #print '%s packet: %s len=%4dB, IPID=%5d port=%s  %15s -> %15s' \
+        #% (self.types[pkt_type], dir_str, len(pkt), ipid, ext_port, src_ip, dst_ip)
         
         #Thus you should always pass nonTCP/UDP/ICMP packets
         if pkt_type in self.types.keys():
@@ -174,7 +174,6 @@ class Firewall:
         return False
         
     def check_port(self, p, r):       #check if port satisfy rule,  p int, r str
- 
         if '-' in r:                                        #subnet
             low_bound, high_bound = r.split('-')
             low_bound = int(low_bound)
@@ -205,15 +204,17 @@ class Firewall:
     # *.peets.com
     # qname in dns name format, domains is line from rules file (string)
     def compare_domains(self, qname, domains):
-        a = self.parse_name(qname)
-        r = domains.split('.')
+        a = self.parse_name(qname)#[::-1]
+        r = domains.split('.')#[::-1]
+        print a
+        print r
         if len(a) < len(r):
             return False
-        #print "query name: ", a
-        #print "rules name: ", r
         i = 0
         while i < len(r) and r != '*':
             if a[i] != r[i] and r[i] != '*':
+                print a[i]
+                print r[i]
                 return False
             i += 1
 
