@@ -15,7 +15,7 @@ class Firewall:
         self.rules_dict = {'UDP' : [],'TCP' : [],'ICMP': [],'DNS' : []   }
 
         # Load the GeoIP DB ('geoipdb.txt') as well.
-        geoipdb = open('g.txt', 'r')
+        geoipdb = open('geoipdb.txt', 'r')
         geo_line = geoipdb.readline()
         while geo_line:
             geo_line = geo_line.split()
@@ -80,8 +80,8 @@ class Firewall:
         if pkt_type == ICMP:
             ext_port, = struct.unpack('!B', pkt[transport_header_offset])
 
-        print '%s packet: %s len=%4dB, IPID=%5d port=%s  %15s -> %15s' \
-        % (self.types[pkt_type], dir_str, len(pkt), ipid, ext_port, src_ip, dst_ip)
+        print '%d packet: %s len=%4dB, IPID=%5d port=%s  %15s -> %15s' \
+        % (pkt_type, dir_str, len(pkt), ipid, ext_port, src_ip, dst_ip)
         
         #Thus you should always pass nonTCP/UDP/ICMP packets
         if pkt_type in self.types.keys():
