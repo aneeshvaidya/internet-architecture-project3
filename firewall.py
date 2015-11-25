@@ -12,9 +12,9 @@ class Firewall:
         self.iface_int = iface_int
         self.iface_ext = iface_ext
         self.geo_dict = {}          #{"US":[[start,end],[start1, end1],...],"CA"[...]}
-        self.rules_dict = {'UDP' : [],'TCP' : [],'ICMP': [],'DNS' : []   }
+        self.rules_dict = {'udp' : [],'tcp' : [],'icmp': [],'dns' : [], 'http' : []  }
 
-        # Load the GeoIP DB ('geoipdb.txt') as well.
+        # Load the GeoIP DB ('geoipdb.txt')
         geoipdb = open('geoipdb.txt', 'r')
         geo_line = geoipdb.readline()
         while geo_line:
@@ -34,13 +34,15 @@ class Firewall:
         rule_line = rules.readline()
         while rule_line:
             rule_line = rule_line.lower().split()
-            if rule_line and (rule_line[0] == 'pass' or rule_line[0] == 'drop'):
-                self.rules_dict[rule_line[1].upper()].append(rule_line)
+            if rule_line and (rule_line[0] in ['pass', 'drop', 'deny', 'log']):
+                self.rules_dict[rule_line[1]].append(rule_line)
                 # hack to DNS/UDP order logic - store UDP rule to DNS rules also
-                if rule_line[1].upper() == "UDP":
+                if rule_line[1] == "udp":
                     self.rules_dict["DNS"].append(rule_line)
             rule_line = rules.readline()
         print self.rules_dict
+        
+        log = open('http.log', 'a')
             
     
     # @pkt_dir: either PKT_DIR_INCOMING or PKT_DIR_OUTGOING
@@ -80,8 +82,8 @@ class Firewall:
         if pkt_type == ICMP:
             ext_port, = struct.unpack('!B', pkt[transport_header_offset])
 
-        print '%d packet: %s len=%4dB, IPID=%5d port=%s  %15s -> %15s' \
-        % (pkt_type, dir_str, len(pkt), ipid, ext_port, src_ip, dst_ip)
+        #print '%s packet: %s len=%4dB, IPID=%5d port=%s  %15s -> %15s' \
+        #% (self.types[pkt_type], dir_str, len(pkt), ipid, ext_port, src_ip, dst_ip)
         
         #Thus you should always pass nonTCP/UDP/ICMP packets
         if pkt_type in self.types.keys():
@@ -174,7 +176,6 @@ class Firewall:
         return False
         
     def check_port(self, p, r):       #check if port satisfy rule,  p int, r str
- 
         if '-' in r:                                        #subnet
             low_bound, high_bound = r.split('-')
             low_bound = int(low_bound)
@@ -205,15 +206,17 @@ class Firewall:
     # *.peets.com
     # qname in dns name format, domains is line from rules file (string)
     def compare_domains(self, qname, domains):
-        a = self.parse_name(qname)
-        r = domains.split('.')
+        a = self.parse_name(qname)#[::-1]
+        r = domains.split('.')#[::-1]
+        print a
+        print r
         if len(a) < len(r):
             return False
-        #print "query name: ", a
-        #print "rules name: ", r
         i = 0
         while i < len(r) and r != '*':
             if a[i] != r[i] and r[i] != '*':
+                print a[i]
+                print r[i]
                 return False
             i += 1
 
@@ -235,3 +238,16 @@ def aInNet(ip,net):
     netmask = 0xffffffff << (32-int(bits))
     return (ip & netmask) == (netaddr & netmask)
 
+    
+def my_checksum(buf, sum=0):
+    i = 0;
+    while i + 1 < len(buf):        # Accumulate checksum
+        w = ((ord(buf[i]) << 8) & 0xFF00) + (ord(buf[i+1]) & 0xFF)
+        sum, i = sum + w, i + 2
+    if len(buf)%2 == 1:          # Handle odd-sized case
+        sum += ord(buf[i]) & 0xFF
+    
+    # take only 16 bits out of the 32 bit sum and add up the carries
+    while (sum >> 16) > 0:
+        sum = (sum & 0xFFFF) + (sum >> 16)        
+    return ~sum & 0xFFFF            # one's complement the result
