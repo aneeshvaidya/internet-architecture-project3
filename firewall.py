@@ -13,36 +13,14 @@ class Firewall:
         self.iface_ext = iface_ext
         self.geo_dict = {}          #{"US":[[start,end],[start1, end1],...],"CA"[...]}
         self.rules_dict = {'udp' : [],'tcp' : [],'icmp': [],'dns' : [], 'http' : []  }
+        self.types = {UDP :'udp', ICMP :"icmp", TCP :"tcp"}        
 
         # Load the GeoIP DB ('geoipdb.txt')
-        geoipdb = open('geoipdb.txt', 'r')
-        geo_line = geoipdb.readline()
-        while geo_line:
-            geo_line = geo_line.split()
-            if geo_line:
-                country_code = geo_line[2].upper()
-                if country_code in self.geo_dict.keys(): 
-                    self.geo_dict[country_code].append([geo_line[0],geo_line[1]])
-                else:
-                    self.geo_dict[country_code]=[[geo_line[0],geo_line[1]]]
-            geo_line = geoipdb.readline()
-
-        self.types = {17:'UDP', 1:"ICMP", 6:"TCP"}
-        
+        self.init_geo('geoipdb.txt')
         # Load the firewall rules (from rule_filename) here.
-        rules = open(config['rule'], 'r')        
-        rule_line = rules.readline()
-        while rule_line:
-            rule_line = rule_line.lower().split()
-            if rule_line and (rule_line[0] in ['pass', 'drop', 'deny', 'log']):
-                self.rules_dict[rule_line[1]].append(rule_line)
-                # hack to DNS/UDP order logic - store UDP rule to DNS rules also
-                if rule_line[1] == "udp":
-                    self.rules_dict["DNS"].append(rule_line)
-            rule_line = rules.readline()
-        print self.rules_dict
+        self.init_rules(config['rule'])
         
-        log = open('http.log', 'a')
+        self.log = open('http.log', 'a')
             
     
     # @pkt_dir: either PKT_DIR_INCOMING or PKT_DIR_OUTGOING
@@ -58,14 +36,15 @@ class Firewall:
         pkt_type, = struct.unpack('!B', pkt[9:10])        #  protocol used for rules check
         
         transport_header_offset = (ord(pkt[0]) & 0x0f) *4
+        if transport_header_offset < 20 : return            # supplemental page 4
         dst_port = pkt[transport_header_offset + 2 : transport_header_offset +4]
         src_port = pkt[transport_header_offset : transport_header_offset +2]
         dst_port, = struct.unpack('!H', dst_port)
         src_port, = struct.unpack('!H', src_port)
-
-        
+       
         ipid, = struct.unpack('!H', pkt[4:6])       # IP identifier (big endian). why do we need it?
 
+        
         if pkt_dir == PKT_DIR_INCOMING:
             dir_str = 'incoming'
             ext_addr = src_ip
@@ -76,64 +55,29 @@ class Firewall:
             ext_addr = dst_ip
             ext_port = dst_port
             self.send_interface = self.iface_ext
-        else:
-            return
 
-        if pkt_type == ICMP:
+        if pkt_type == ICMP:                    #handle type instead of port for ICMP
             ext_port, = struct.unpack('!B', pkt[transport_header_offset])
 
         #print '%s packet: %s len=%4dB, IPID=%5d port=%s  %15s -> %15s' \
         #% (self.types[pkt_type], dir_str, len(pkt), ipid, ext_port, src_ip, dst_ip)
         
+        last_verdict = 'pass'        
         #Thus you should always pass nonTCP/UDP/ICMP packets
         if pkt_type in self.types.keys():
             protocol = self.types[pkt_type]
-        else:
-            self.send_interface.send_ip_packet(pkt)  
-            return
-      
-        last_verdict = 'pass'
 
-        #DNS packet processing
-        is_valid_dns = False        
-        if dir_str == 'outgoing' and pkt_type == UDP and dst_port == 53:    
-            dns_pkt_offset = transport_header_offset + 8
-            qdcount = pkt[dns_pkt_offset + 4: dns_pkt_offset + 6]
-            qdcount, = struct.unpack('!H', qdcount)
-            if qdcount == 1:                                    # only one question
-                querry_offset = dns_pkt_offset + 12
-                dns_pkt = pkt[querry_offset : ]
-                rr_type_offset = dns_pkt.index('\0') + 1
-                qtype = dns_pkt[rr_type_offset : rr_type_offset + 2]
-                qtype, = struct.unpack('!H', qtype)
-                qclass = dns_pkt[rr_type_offset +2 : rr_type_offset +4]
-                qclass, = struct.unpack('!H', qclass)
-                if (qtype == 1 or qtype == 28) and qclass == 1:
-                    is_valid_dns = True                
-                    qname = dns_pkt[ : rr_type_offset ]
-                    for dns_rule in self.rules_dict["DNS"]:
-                        #print dns_rule
-                        if dns_rule[1] == 'dns':
-                            if dns_rule[2] == '*':
-                                last_verdict = dns_rule[0]
-                                continue
-                            if self.compare_domains(qname, dns_rule[2]):
-                                last_verdict = dns_rule[0]
-                                #print last_verdict
-                        if dns_rule[1] == 'udp': 
-                            v = self.apply_rule(dns_rule, ext_addr, ext_port);
-                            if v:
-                                #print v
-                                last_verdict = v;
-                                
-            if is_valid_dns and last_verdict == 'pass':
-                self.send_interface.send_ip_packet(pkt)
-                return
-                
-        for rule in self.rules_dict[protocol]:       # check rules no DNS
-            v = self.apply_rule(rule, ext_addr, ext_port);
-            if v:
-                last_verdict = v;                
+            #DNS packet processing     
+            if dir_str == 'outgoing' and pkt_type == UDP and dst_port == 53:
+                is_valid_dns = self.handle_DNS(pkt, transport_header_offset, last_verdict)
+                if is_valid_dns and last_verdict == 'pass':
+                    self.send_interface.send_ip_packet(pkt)
+                    return
+            # check rules no DNS        
+            for rule in self.rules_dict[protocol]:       
+                v = self.apply_rule(rule, ext_addr, ext_port);
+                if v:
+                    last_verdict = v;                
 
         if last_verdict == 'pass':                  # allow the packet.
                 self.send_interface.send_ip_packet(pkt)
@@ -221,8 +165,66 @@ class Firewall:
             i += 1
 
         return True
+        
+    def init_geo(self,geo_file):    
+        geoipdb = open(geo_file, 'r')
+        geo_line = geoipdb.readline()
+        while geo_line:
+            geo_line = geo_line.split()
+            if geo_line:
+                country_code = geo_line[2].upper()
+                if country_code in self.geo_dict.keys(): 
+                    self.geo_dict[country_code].append([geo_line[0],geo_line[1]])
+                else:
+                    self.geo_dict[country_code]=[[geo_line[0],geo_line[1]]]
+            geo_line = geoipdb.readline()
             
-      
+            
+    def init_rules(self,rules_file): 
+        rules = open(rules_file, 'r')        
+        rule_line = rules.readline()
+        while rule_line:
+            rule_line = rule_line.lower().split()
+            if rule_line and (rule_line[0] in ['pass', 'drop', 'deny', 'log']):
+                self.rules_dict[rule_line[1]].append(rule_line)
+                # hack to DNS/UDP order logic - store UDP rule to DNS rules also
+                if rule_line[1] == "udp":
+                    self.rules_dict["dns"].append(rule_line)
+            rule_line = rules.readline()
+        print self.rules_dict  
+
+    def handle_DNS(self, pkt, dns_pkt_offset, verdict):
+        is_valid_dns = False  
+        dns_pkt_offset = dns_pkt_offset + 8
+        qdcount = pkt[dns_pkt_offset + 4: dns_pkt_offset + 6]
+        qdcount, = struct.unpack('!H', qdcount)
+        if qdcount == 1:                                    # only one question
+            querry_offset = dns_pkt_offset + 12
+            dns_pkt = pkt[querry_offset : ]
+            rr_type_offset = dns_pkt.index('\0') + 1
+            qtype = dns_pkt[rr_type_offset : rr_type_offset + 2]
+            qtype, = struct.unpack('!H', qtype)
+            qclass = dns_pkt[rr_type_offset +2 : rr_type_offset +4]
+            qclass, = struct.unpack('!H', qclass)
+            if (qtype == 1 or qtype == 28) and qclass == 1:
+                is_valid_dns = True                
+                qname = dns_pkt[ : rr_type_offset ]
+                for dns_rule in self.rules_dict["dns"]:
+                    #print dns_rule
+                    if dns_rule[1] == 'dns':
+                        if dns_rule[2] == '*':
+                            verdict = dns_rule[0]
+                            continue
+                        if self.compare_domains(qname, dns_rule[2]):
+                            verdict = dns_rule[0]
+                    if dns_rule[1] == 'udp': 
+                        v = self.apply_rule(dns_rule, ext_addr, ext_port);
+                        if v:
+                            verdict = v;
+        return is_valid_dns
+                            
+                            
+
 
 
 def dottedQuadToNum(ip):
