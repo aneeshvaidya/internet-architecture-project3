@@ -10,11 +10,12 @@ from main import PKT_DIR_INCOMING, PKT_DIR_OUTGOING
 class Firewall:
     UDP = 17
     TCP = 6
+    DNS = 1
     def __init__(self, config, iface_int, iface_ext):
         self.iface_int = iface_int
         self.iface_ext = iface_ext
         self.geo_dict = {}
-        self.rules_dict = {'TCP' : [], 'DNS' : [], 'HTTP' : []}
+        self.rules_dict = {'tcp' : [], 'dns' : [], 'http' : []}
         self.types = {Firewall.UDP: 'udp', Firewall.TCP: 'tcp'}
         self.log = open('http.log', 'a')
 
@@ -72,12 +73,20 @@ class Firewall:
             self.send_interface = self.iface_ext
 
         # If TCP or DNS(UDP), apply rules, otherwise pass packet
-        if pkt_type == Firewall.TCP or self.dns_check(pkt, pkt_type):
+        protocol = self.types[pkt_type]
+
+        #check for dns here
+        if dir_str == 'outgoing' and pkt_type == Firewall.UDP and dst_port == 53:
+            dns = self.dns_check(pkt, transport_offset)
+        if dns:
+            protocol = 'dns'
+        else:
             protocol = self.types[pkt_type]
+
+        if pkt_type == Firewall.TCP or dns:
             for rule in reversed(self.rules_dict[protocol]):
-                verdict = self.apply_rule(rule, ext_addr, ext_port)
-                if verdict:
-                    return
+                if self.match_rule(rule, ext_addr, ext_port)
+                    self.handle_rule_match(rule, pkt)
         else:
             self.send_interface.send_ip_packet(pkt)
             return
@@ -89,12 +98,24 @@ class Firewall:
 
         # Apply rule -> Match -> send to handler
 
-    def apply_rule(self, rule, addr, port):
+    def match_rule(self, rule, addr, port):
         pass
 
-    def dns_check(self, pkt, pkt_type):
-        pass
-
+    def dns_check(pkt, transport_offset):
+        dns_pkt_offset = transport_offset + 8
+        qdcount = pkt[dns_pkt_offset + 4: dns_pkt_offset + 6]
+        qdcount, = struct,unpack('!H', qdcount)
+        if qdcount == 1:
+            query_offset = dns_pkt_offset + 12
+            dns_pkt = pkt[query_offset:]
+            rr_type_offset = dns_pkt.index('\0')
+            qtype = dns_pkt[rr_type_offset: rr_type_offset + 2]
+            qtype, = struct.unpack('!H', qtype)
+            qclass = dns_pkt[rr_type_offset + 2; rr_type_offset + 4]
+            qclass, = struct.unpack('!H', qclass)
+            if (qtype == 1 or qtype == 28) and qclass == 1:
+                return True
+        return False
 
 def dotted_quad_to_num(ip):
     return struct.unpack('>L', socket.inet_aton(ip))[0]
