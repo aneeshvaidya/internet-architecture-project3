@@ -10,7 +10,6 @@ from main import PKT_DIR_INCOMING, PKT_DIR_OUTGOING
 class Firewall:
     UDP = 17
     TCP = 6
-    DNS = 1
     def __init__(self, config, iface_int, iface_ext):
         self.iface_int = iface_int
         self.iface_ext = iface_ext
@@ -77,13 +76,14 @@ class Firewall:
 
         #check for dns here
         if dir_str == 'outgoing' and pkt_type == Firewall.UDP and dst_port == 53:
-            dns = self.dns_check(pkt, transport_offset)
-        if dns:
-            protocol = 'dns'
-        else:
-            protocol = self.types[pkt_type]
+            dns, qname = self.dns_check(pkt, transport_offset)
+        
 
         if pkt_type == Firewall.TCP or dns:
+            if dns:
+                protocol = 'dns'
+            else:
+                protocol = self.types[pkt_type]
             for rule in reversed(self.rules_dict[protocol]):
                 if self.match_rule(rule, ext_addr, ext_port)
                     self.handle_rule_match(rule, pkt)
@@ -99,6 +99,7 @@ class Firewall:
         # Apply rule -> Match -> send to handler
 
     def match_rule(self, rule, addr, port):
+
         pass
 
     def dns_check(pkt, transport_offset):
@@ -108,14 +109,18 @@ class Firewall:
         if qdcount == 1:
             query_offset = dns_pkt_offset + 12
             dns_pkt = pkt[query_offset:]
-            rr_type_offset = dns_pkt.index('\0')
+            rr_type_offset = dns_pkt.index('\0') + 1
             qtype = dns_pkt[rr_type_offset: rr_type_offset + 2]
             qtype, = struct.unpack('!H', qtype)
             qclass = dns_pkt[rr_type_offset + 2; rr_type_offset + 4]
             qclass, = struct.unpack('!H', qclass)
             if (qtype == 1 or qtype == 28) and qclass == 1:
-                return True
-        return False
+                qname = dns_pkt[: rr_type_offset]
+                return True, qname
+        return False, None
+
+    def deny_tcp(pkt):
+
 
 def dotted_quad_to_num(ip):
     return struct.unpack('>L', socket.inet_aton(ip))[0]
@@ -128,6 +133,20 @@ def addr_in_subnet(ip, subnet):
     netmask = 0xffffffff << (32-int(bits))
     return (ip & netmask) == (netaddr & netmask)
 
+def tcp_checksum(buf, total=0):
+    i = 0
+    while i + 1 < len(buf):
+         w = ((ord(buf[i]) << 8) & 0xFF00) + (ord(buf[i+1]) & 0xFF)
+         total, i = total + w, i + 2
+    if len(buf) % 2 == 1:
+        total += ord(buf[i]) & 0xFF
+
+    while (total >> 16) > 0:
+        total = (total & 0xFFFF) + (total >> 16)
+    return ~total & 0xFFFF
+
+
+
 
 
 
@@ -135,3 +154,17 @@ def addr_in_subnet(ip, subnet):
     # TODO: You can add more methods as you want.
 
 # TODO: You may want to add more classes/functions as well.
+
+class Connection:
+
+    def __init__(self, ext_addr, in_addr, ext_port, in_port):
+        self.ext_addr = ext_addr  
+        self.in_addr = in_addr
+        self.ext_port = ext_port
+        self.in_port = in_port
+
+        self.request_data = ''
+        self.response_data  = ''
+
+        self.sender_seqno = None
+        self.receiver_seqno = None
