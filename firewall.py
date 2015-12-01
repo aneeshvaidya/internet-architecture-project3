@@ -229,20 +229,27 @@ class Firewall:
                             
     def build_DNS_packet(self, pkt):
     
-        packet = pkt[:2]  # Query Ids (Just 1 for now)
+        packet = pkt[:2] # ID
         # +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
         # |QR|   Opcode  |AA|TC|RD|RA|   Z    |   RCODE   |
         # +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
         #  1      copy     1   0  0  0  0         0
         opcode = pkt[2] & 0x78
-        opcode = ((0x80 + opcode + 0x04) << 8) & 0xFF
-        packet += struct.pack("!H", 256)  # Flags
+        opcode = ((0x80 + opcode + 0x04) << 8) & 0xFF00
+        packet += struct.pack("!H", opcode)  # Flags
         packet += struct.pack("!H", 0)  # Questions
         packet += struct.pack("!H", 1)  # Answers
         packet += struct.pack("!H", 0)  # Authorities
         packet += struct.pack("!H", 0)  # Additional
-        packet += struct.pack("!H", 1)  # Query Type
-        packet += struct.pack("!H", 1)  # Query Class
+        qname = pkt[12: ]
+        packet += qname[ :pkt.index('\0') +1] # NAME
+
+        packet += struct.pack("!H", 1)  # Type
+        packet += struct.pack("!H", 1)  # Class
+        packet += struct.pack("!H", 1)  # TTL
+        packet += struct.pack("!H", 4)  # RDLENGTH
+        packet += socket.inet_aton('169.229.49.13') # RDATA
+        return packet
 
 
 
