@@ -51,7 +51,7 @@ class Firewall:
         # TODO: Your main firewall code will be here.
         src_ip = socket.inet_ntoa(pkt[12:16])
         dst_ip = socket.inet_ntoa(pkt[16:20])
-        pkt_type = struct.unpack('!B', pkt[9])
+        pkt_type, = struct.unpack('!B', pkt[9])
 
         transport_offset = (ord(pkt[0]) & 0x0f) * 4
         src_port = pkt[transport_offset:transport_offset + 2]
@@ -77,19 +77,32 @@ class Firewall:
         #check for dns here
         if dir_str == 'outgoing' and pkt_type == Firewall.UDP and dst_port == 53:
             dns, qname = self.dns_check(pkt, transport_offset)
+        else:
+            dns = False
         
 
-        if pkt_type == Firewall.TCP or dns:
-            if dns:
-                protocol = 'dns'
-            else:
-                protocol = self.types[pkt_type]
-            for rule in reversed(self.rules_dict[protocol]):
-                if self.match_rule(rule, ext_addr, ext_port)
-                    self.handle_rule_match(rule, pkt)
+        # if pkt_type == Firewall.TCP or dns:
+        #     if dns:
+        #         protocol = 'dns'
+        #     else:
+        #         protocol = self.types[pkt_type]
+        #     for rule in reversed(self.rules_dict[protocol]):
+        #         if self.match_rule(rule, ext_addr, ext_port)
+        #             self.handle_rule_match(rule, pkt)
+        # else:
+        #     self.send_interface.send_ip_packet(pkt)
+        #     return
+
+        if dns:
+            for rule in reversed(self.rules_dict['dns']):
+                rule = rule.split()
+                if self.compare_domains(qname, rule[2]):
+                    self.deny_dns(pkt, transport_offset)
+        elif pkt_type == Firewall.TCP:
+            #first run through deny rules. Otherwise log and match connection
+            pass
         else:
             self.send_interface.send_ip_packet(pkt)
-            return
 
         # For applying rules, we can be smart and apply them in
         # reverse order, since the last matching rule in forward
@@ -98,28 +111,54 @@ class Firewall:
 
         # Apply rule -> Match -> send to handler
 
-    def match_rule(self, rule, addr, port):
 
-        pass
-
-    def dns_check(pkt, transport_offset):
+    def dns_check(self, pkt, transport_offset):
         dns_pkt_offset = transport_offset + 8
         qdcount = pkt[dns_pkt_offset + 4: dns_pkt_offset + 6]
-        qdcount, = struct,unpack('!H', qdcount)
+        qdcount, = struct.unpack('!H', qdcount)
         if qdcount == 1:
             query_offset = dns_pkt_offset + 12
             dns_pkt = pkt[query_offset:]
             rr_type_offset = dns_pkt.index('\0') + 1
             qtype = dns_pkt[rr_type_offset: rr_type_offset + 2]
             qtype, = struct.unpack('!H', qtype)
-            qclass = dns_pkt[rr_type_offset + 2; rr_type_offset + 4]
+            qclass = dns_pkt[rr_type_offset + 2: rr_type_offset + 4]
             qclass, = struct.unpack('!H', qclass)
             if (qtype == 1 or qtype == 28) and qclass == 1:
                 qname = dns_pkt[: rr_type_offset]
                 return True, qname
         return False, None
 
-    def deny_tcp(pkt):
+    def deny_tcp(self, pkt):
+        # Set flags in header, compute TCP checksum
+        # Switch dst and src ip, compute ipv4 checksum
+        pass
+
+    def deny_dns(self, pkt, transport_offset):
+        pass
+
+    def compare_domains(self, qname, domain):
+        a = self.parse_name(qname)
+        r = domain.split('.')
+        if len(a) < len(r):
+            return False
+        i = 0
+        while i < len(r) and r != '*':
+            if a[i] != r[i] and r[i] != '*':
+                return False
+            i += 1
+        return True
+
+    def parse_name(self, qname):
+        ret = []
+        le = ord(qname[0])
+        beg = 0
+        while le != 0:
+            ret.append(a[beg + 1: beg + le + 1])
+            beg = beg + le + 1
+            le = ord(qname[beg])
+        return ret
+
 
 
 def dotted_quad_to_num(ip):
@@ -145,8 +184,9 @@ def tcp_checksum(buf, total=0):
         total = (total & 0xFFFF) + (total >> 16)
     return ~total & 0xFFFF
 
-
-
+def ipv4_checksum():
+    pass
+    
 
 
 
