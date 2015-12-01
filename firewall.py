@@ -228,7 +228,6 @@ class Firewall:
         pass
                             
     def build_DNS_packet(self, pkt):
-    
         packet = pkt[:2] # ID
         # +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
         # |QR|   Opcode  |AA|TC|RD|RA|   Z    |   RCODE   |
@@ -250,6 +249,33 @@ class Firewall:
         packet += struct.pack("!H", 4)  # RDLENGTH
         packet += socket.inet_aton('169.229.49.13') # RDATA
         return packet
+        
+    def build_UDP_packet(self, pkt):
+        packet = pkt[2 : 4]             # dst_port
+        packet += pkt[ : 2]             # src_port 
+        dns_packet = self.build_DNS_packet(pkt[8:])
+        packet += struct.pack("!H", len(dns_packet))  # LENGTH
+        packet += struct.pack("!H", 0)  # checksum
+        packet += dns_packet  
+        return packet
+        
+    def build_IP_packet(self, pkt, payload):
+        
+        packet = pkt[ :2]             # version, IHL, TOS
+        packet += struct.pack("!H", len(payload) +20)   # Total length
+        packet += pkt[4:6]              # ID
+        packet += pkt[6:8]              # flags magic
+        packet += pkt[8:10]             # TTL, protocol
+        packet += struct.pack("!H", 0)  # checksum
+        packet += pkt[16 : 20]             # dst_addr
+        packet += pkt[12 : 16]             # src_addr
+
+        packet = packet[:10] + my_checksum(packet) + packet[12:]
+
+        return packet
+
+        
+        
 
 
 
