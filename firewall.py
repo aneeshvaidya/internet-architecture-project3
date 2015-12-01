@@ -13,7 +13,8 @@ class Firewall:
         self.iface_ext = iface_ext
         self.geo_dict = {}          #{"US":[[start,end],[start1, end1],...],"CA"[...]}
         self.rules_dict = {'udp' : [],'tcp' : [],'icmp': [],'dns' : [], 'http' : []  }
-        self.types = {UDP :'udp', ICMP :"icmp", TCP :"tcp"}        
+        self.types = {UDP :'udp', ICMP :"icmp", TCP :"tcp"}  
+        self.connections = {}
 
         # Load the GeoIP DB ('geoipdb.txt')
         self.init_geo('geoipdb.txt')
@@ -69,7 +70,7 @@ class Firewall:
 
             #DNS packet processing     
             if dir_str == 'outgoing' and pkt_type == UDP and dst_port == 53:
-                is_valid_dns = self.handle_DNS(pkt, transport_header_offset, last_verdict)
+                is_valid_dns = self.handle_DNS(pkt[transport_header_offset:], last_verdict)
                 if is_valid_dns and last_verdict == 'pass':
                     self.send_interface.send_ip_packet(pkt)
                     return
@@ -193,9 +194,9 @@ class Firewall:
             rule_line = rules.readline()
         print self.rules_dict  
 
-    def handle_DNS(self, pkt, dns_pkt_offset, verdict):
+    def handle_DNS(self, pkt, verdict):
         is_valid_dns = False  
-        dns_pkt_offset = dns_pkt_offset + 8
+        dns_pkt_offset = 8
         qdcount = pkt[dns_pkt_offset + 4: dns_pkt_offset + 6]
         qdcount, = struct.unpack('!H', qdcount)
         if qdcount == 1:                                    # only one question
@@ -222,8 +223,26 @@ class Firewall:
                         if v:
                             verdict = v;
         return is_valid_dns
+        
+    def parse_http(self, pkt):
+        pass
                             
-                            
+    def build_DNS_packet(self, pkt):
+    
+        packet = pkt[:2]  # Query Ids (Just 1 for now)
+        # +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+        # |QR|   Opcode  |AA|TC|RD|RA|   Z    |   RCODE   |
+        # +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+        #  1      copy     1   0  0  0  0         0
+        opcode = pkt[2] & 0x78
+        opcode = ((0x80 + opcode + 0x04) << 8) & 0xFF
+        packet += struct.pack("!H", 256)  # Flags
+        packet += struct.pack("!H", 0)  # Questions
+        packet += struct.pack("!H", 1)  # Answers
+        packet += struct.pack("!H", 0)  # Authorities
+        packet += struct.pack("!H", 0)  # Additional
+        packet += struct.pack("!H", 1)  # Query Type
+        packet += struct.pack("!H", 1)  # Query Class
 
 
 
