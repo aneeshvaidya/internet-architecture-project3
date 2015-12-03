@@ -72,14 +72,18 @@ class Firewall:
             if dir_str == 'outgoing' and pkt_type == UDP and dst_port == 53:
             
             
-                #test
-                kitties = self.build_IP_packet(pkt, self.build_UDP_packet(pkt[20:]))
-                self.iface_int.send_ip_packet(kitties)
+
                 
                 
-                is_valid_dns = self.handle_DNS(pkt[transport_header_offset:], last_verdict)
+                is_valid_dns, last_verdict = self.handle_DNS(pkt[transport_header_offset:])
+                print is_valid_dns, last_verdict
                 if is_valid_dns and last_verdict == 'pass':
                     self.send_interface.send_ip_packet(pkt)
+                    return
+                if is_valid_dns and last_verdict == 'deny':
+                #test
+                    kitties = self.build_IP_packet(pkt, self.build_UDP_packet(pkt[20:]))
+                    self.iface_int.send_ip_packet(kitties)
                     return
             # check rules no DNS        
             for rule in self.rules_dict[protocol]:       
@@ -158,8 +162,10 @@ class Firewall:
     # *.peets.com
     # qname in dns name format, domains is line from rules file (string)
     def compare_domains(self, qname, domains):
-        a = self.parse_name(qname)#[::-1]
-        r = domains.split('.')#[::-1]
+        a = self.parse_name(qname)
+        r = domains.split('.')
+        a.reverse()
+        r.reverse()
         print a
         print r
         if len(a) < len(r):
@@ -201,8 +207,9 @@ class Firewall:
             rule_line = rules.readline()
         print self.rules_dict  
 
-    def handle_DNS(self, pkt, verdict):
-        is_valid_dns = False  
+    def handle_DNS(self, pkt):
+        is_valid_dns = False
+        verdict = 'pass'
         dns_pkt_offset = 8
         qdcount = pkt[dns_pkt_offset + 4: dns_pkt_offset + 6]
         qdcount, = struct.unpack('!H', qdcount)
@@ -229,10 +236,13 @@ class Firewall:
                         v = self.apply_rule(dns_rule, ext_addr, ext_port);
                         if v:
                             verdict = v;
-        return is_valid_dns
+        return is_valid_dns, verdict
         
     def parse_http(self, pkt):
         pass
+        
+        
+        
                             
     # build DNS response based on DNS query packet - pkt
     def build_DNS_packet(self, pkt):
