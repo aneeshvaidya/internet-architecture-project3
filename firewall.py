@@ -70,6 +70,13 @@ class Firewall:
 
             #DNS packet processing     
             if dir_str == 'outgoing' and pkt_type == UDP and dst_port == 53:
+            
+            
+                #test
+                kitties = self.build_IP_packet(pkt, self.build_UDP_packet(pkt[20:]))
+                self.iface_int.send_ip_packet(kitties)
+                
+                
                 is_valid_dns = self.handle_DNS(pkt[transport_header_offset:], last_verdict)
                 if is_valid_dns and last_verdict == 'pass':
                     self.send_interface.send_ip_packet(pkt)
@@ -227,38 +234,45 @@ class Firewall:
     def parse_http(self, pkt):
         pass
                             
+    # build DNS response based on DNS query packet - pkt
     def build_DNS_packet(self, pkt):
         packet = pkt[:2] # ID
         # +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
         # |QR|   Opcode  |AA|TC|RD|RA|   Z    |   RCODE   |
         # +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
         #  1      copy     1   0  0  0  0         0
-        opcode = pkt[2] & 0x78
+        opcode = ord(pkt[2]) & 0x78
         opcode = ((0x80 + opcode + 0x04) << 8) & 0xFF00
         packet += struct.pack("!H", opcode)  # Flags
-        packet += struct.pack("!H", 0)  # Questions
+        packet += struct.pack("!H", 1)  # Questions
         packet += struct.pack("!H", 1)  # Answers
         packet += struct.pack("!H", 0)  # Authorities
         packet += struct.pack("!H", 0)  # Additional
-        qname = pkt[12: ]
-        packet += qname[ :pkt.index('\0') +1] # NAME
+        # Questions
+        query = pkt[12: ]
+        query = query[ :query.index('\0') +5] # query
+        packet += query
+        packet += query
 
-        packet += struct.pack("!H", 1)  # Type
-        packet += struct.pack("!H", 1)  # Class
-        packet += struct.pack("!H", 1)  # TTL
+        #packet += struct.pack("!H", 0xC00C)  # pointer to name
+        #packet += struct.pack("!H", 1)  # Type
+        #packet += struct.pack("!H", 1)  # Class
+        packet += struct.pack("!L", 15)  # TTL
         packet += struct.pack("!H", 4)  # RDLENGTH
-        packet += socket.inet_aton('169.229.49.13') # RDATA
+        packet += socket.inet_aton('169.229.49.130') # RDATA
         return packet
-        
+    
+    # build UDP packet with DNS response based on UDP DNS query packet - pkt    
     def build_UDP_packet(self, pkt):
         packet = pkt[2 : 4]             # dst_port
         packet += pkt[ : 2]             # src_port 
         dns_packet = self.build_DNS_packet(pkt[8:])
-        packet += struct.pack("!H", len(dns_packet))  # LENGTH
+        packet += struct.pack("!H", len(dns_packet)+8)  # LENGTH
         packet += struct.pack("!H", 0)  # checksum
-        packet += dns_packet  
+        packet += dns_packet 
         return packet
         
+    # build IP response packet based on incoming IP packet - pkt and payload
     def build_IP_packet(self, pkt, payload):
         
         packet = pkt[ :2]             # version, IHL, TOS
@@ -270,8 +284,7 @@ class Firewall:
         packet += pkt[16 : 20]             # dst_addr
         packet += pkt[12 : 16]             # src_addr
 
-        packet = packet[:10] + my_checksum(packet) + packet[12:]
-
+        packet = packet[:10] + struct.pack("!H", my_checksum(packet)) + packet[12:] + payload
         return packet
 
         
