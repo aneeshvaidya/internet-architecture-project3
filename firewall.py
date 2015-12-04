@@ -95,7 +95,12 @@ class Firewall:
                     
             #TCP packets processing
             if pkt_type == TCP:
-                pass
+                for rule in reversed(self.rules_dict['tcp']):
+                    v = self.apply_rule(rule, ext_addr, ext_port)
+                    if v:
+                        rst_packet = self.deny_tcp(deny, transport_header_offset)
+                        self.send_interface.send_ip_packet(rst_packet)
+                        return
 
 
 
@@ -259,7 +264,6 @@ class Firewall:
             if a[i] != r[i] and r[i] != '*':
                 return False
             i += 1
-
         return True
         
     def init_geo(self,geo_file):    
@@ -322,6 +326,9 @@ class Firewall:
         
     def process_stream(self, con):
         pass
+
+    def deny_tcp(pkt, transport_header_offset):
+        
         
         
         
