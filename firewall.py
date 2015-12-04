@@ -257,11 +257,13 @@ class Firewall:
     # www.cafe3.peets.com
     # *.peets.com
     # qname list, domains is line from rules file (string)
-    def compare_domains(self, qname, domains):
-        a = qname
+    def compare_domains(self, qname, domains):        
+        a = qname.split('.')
         r = domains.split('.')
-        a.reverse()
-        r.reverse()
+        print a
+        print r
+        a = a[::-1]
+        r = r[::-1]
         if len(a) < len(r):
             return False
         i = 0
@@ -342,15 +344,18 @@ class Firewall:
                     status = req[1]
         if host:
             for rule in self.rules_dict["http"]:
+                print rule
                 if self.compare_domains(host, rule[2]):
                     req = stream[0].split()
                     method = req[0]
                     path = req[1]
                     version = req[2]
-                    
-
-                    log.write(host, method, path, version, status, cont_len)
-        print host, method, path, version, status, cont_len              
+                    print "In process stream...."
+                    print host, method, path, version, status, cont_len   
+                    write_line = host + ' ' + method + ' ' + path + ' ' + version + ' ' + status + ' ' + cont_len
+                    print write_line
+                    self.log.write(write_line)
+                              
             
     def deny_tcp(pkt, transport_header_offset):
         ip_header = self.build_IP_packet(pkt, None)
