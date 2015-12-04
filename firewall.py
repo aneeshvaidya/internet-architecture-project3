@@ -107,7 +107,7 @@ class Firewall:
                     TCPrequest = Connection(dst_ip, src_ip, dst_port, src_port)
                     TCPrequest.sender_seqno, = struct.unpack('!L', pkt[transport_header_offset + 4: transport_header_offset + 8]) #1000
                     self.TCPrequests.append(TCPrequest)
-                    print 'SYN ', TCPrequest.sender_seqno
+                    #print 'SYN ', TCPrequest
                     
                 # establish TCP connections             2 handshake
                 if is_ack_flag and is_syn_flag and pkt_dir == PKT_DIR_INCOMING:
@@ -116,10 +116,10 @@ class Firewall:
                         i = self.TCPrequests.index(TCPresponse)
                         TCPresponse.receiver_seqno, = struct.unpack('!L', pkt[transport_header_offset + 4: transport_header_offset + 8])#2000
                         TCPresponse.sender_seqno, = struct.unpack('!L', pkt[transport_header_offset + 8: transport_header_offset + 12]) #1001
-                        print 'SYN + ACK ', TCPresponse.receiver_seqno, ' + ', TCPresponse.sender_seqno
+                        #print 'SYN + ACK ', TCPresponse
                         if self.TCPrequests[i].sender_seqno + 1 == TCPresponse.sender_seqno: 
                             self.TCPresponses.append(TCPresponse)
-                            self.TCPrequests.pop[i]
+                            self.TCPrequests.remove(TCPresponse)
                             
                         
                             
@@ -128,35 +128,42 @@ class Firewall:
                     TCP_pkt = Connection(dst_ip, src_ip, dst_port, src_port)
                     TCP_pkt.sender_seqno, = struct.unpack('!L', pkt[transport_header_offset + 4: transport_header_offset + 8])   #1001
                     TCP_pkt.receiver_seqno, = struct.unpack('!L', pkt[transport_header_offset + 8: transport_header_offset + 12])#2001
-                    print 'about to establish ', TCP_pkt.sender_seqno , ' + ', TCP_pkt.receiver_seqno
+                    
                     if TCP_pkt in self.TCPresponses:
                         i = self.TCPresponses.index(TCP_pkt)
                         if self.TCPresponses[i].sender_seqno == TCP_pkt.sender_seqno and self.TCPresponses[i].receiver_seqno + 1 == TCP_pkt.receiver_seqno:
                             self.TCPconnections.append(TCP_pkt)
-                            self.TCPresponses.pop(i)
+                            self.TCPresponses.remove(TCP_pkt)
+                            print "\n####   connection established    ####", TCP_pkt
                     if TCP_pkt in self.TCPconnections:
                         i = self.TCPconnections.index(TCP_pkt)
+                        print 'TCP outgoing ', TCP_pkt
+                        print "Dic ", self.TCPconnections, self.TCPconnections[0].stream
+                        
                         if self.TCPconnections[i].sender_seqno == TCP_pkt.sender_seqno and self.TCPconnections[i].receiver_seqno == TCP_pkt.receiver_seqno:
-                            payload = pkt[tcp_payload_offset:]
+                            
+                            payload = pkt[transport_header_offset + tcp_payload_offset:]
                             self.TCPconnections[i].stream += payload
-                            self.process_stream(TCPconnections[i])
+                            self.process_stream(self.TCPconnections[i])
                             self.TCPconnections[i].sender_seqno += len(payload)     #1006
+                            print "payload = ",len(payload), tcp_payload_offset
                         if is_fin_flag:                                     # dirty early termination
-                            self.TCPconnections.pop(i)
+                            self.TCPconnections.remove(TCP_pkt)
                         
                 if is_ack_flag and not is_syn_flag and pkt_dir == PKT_DIR_INCOMING: 
                     TCP_pkt = Connection(src_ip, dst_ip, src_port, dst_port)
                     TCP_pkt.receiver_seqno, = struct.unpack('!L', pkt[transport_header_offset + 4: transport_header_offset + 8]) #2001
                     TCP_pkt.sender_seqno, = struct.unpack('!L', pkt[transport_header_offset + 8: transport_header_offset + 12])#1006
+                    print 'TCP incoming ', TCP_pkt
                     if TCP_pkt in self.TCPconnections:
                         i = self.TCPconnections.index(TCP_pkt)
                         if self.TCPconnections[i].sender_seqno == TCP_pkt.sender_seqno and self.TCPconnections[i].receiver_seqno == TCP_pkt.receiver_seqno:
-                            payload = pkt[tcp_payload_offset:]
+                            payload = pkt[transport_header_offset + tcp_payload_offset:]
                             self.TCPconnections[i].stream += payload
-                            self.process_stream(TCPconnections[i])
+                            self.process_stream(self.TCPconnections[i])
                             self.TCPconnections[i].receiver_seqno += len(payload)     #1006                        
                         if is_fin_flag:                                         # dirty early termination
-                            self.TCPconnections.pop(i)
+                            self.TCPconnections.remove(TCP_pkt)
             
             
             
@@ -313,6 +320,9 @@ class Firewall:
     def parse_http(self, pkt):
         pass
         
+    def process_stream(self, con):
+        pass
+        
         
         
                             
@@ -423,9 +433,10 @@ class Connection:
             return False
             
     def __str__(self):
-        return "Connection: ext " + str(self.ext_addr) + ":" + str(self.ext_port) + " int " + str(self.in_addr) +\
-        ":" + str(self.in_port) + "\n sender # " + str(self.sender_seqno) + " rec # " + str(self.receiver_seqno) +\
-        "\n Stream: " + self.stream
+        # return "Connection: ext " + str(self.ext_addr) + ":" + str(self.ext_port) + " int " + str(self.in_addr) +\
+        # ":" + str(self.in_port) + 
+        return " sender # " + str(self.sender_seqno) + " rec # " + str(self.receiver_seqno) 
+        #"\n Stream: " + self.stream
         
     __repr__ = __str__
         
