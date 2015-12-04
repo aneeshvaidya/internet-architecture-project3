@@ -14,7 +14,9 @@ class Firewall:
         self.geo_dict = {}          #{"US":[[start,end],[start1, end1],...],"CA"[...]}
         self.rules_dict = {'udp' : [],'tcp' : [],'icmp': [],'dns' : [], 'http' : []  }
         self.types = {UDP :'udp', ICMP :"icmp", TCP :"tcp"}  
-        self.connections = {}
+        self.TCPconnections = []    # established connections
+        self.TCPrequests = []       # 1st handshake
+        self.TCPresponses = []       # 2nd handshake
 
         # Load the GeoIP DB ('geoipdb.txt')
         self.init_geo('geoipdb.txt')
@@ -43,7 +45,13 @@ class Firewall:
         dst_port, = struct.unpack('!H', dst_port)
         src_port, = struct.unpack('!H', src_port)
        
-        ipid, = struct.unpack('!H', pkt[4:6])       # IP identifier (big endian). why do we need it?
+        ipid, = struct.unpack('!H', pkt[4:6])       # IP identifier (big endian).
+        
+        tcp_payload_offset = ((ord(pkt[transport_header_offset + 12])) & 0xf0) >> 2 #already multyplied by 4
+        tcp_flags = ord(pkt[transport_header_offset + 13])
+        is_syn_flag = tcp_flags & 0x2 > 0
+        is_ack_flag = tcp_flags & 0x10 > 0
+        is_fin_flag = tcp_flags & 0x1 > 0
 
         
         if pkt_dir == PKT_DIR_INCOMING:
@@ -51,11 +59,15 @@ class Firewall:
             ext_addr = src_ip
             ext_port = src_port
             self.send_interface = self.iface_int
+            in_addr = dst_ip
+            in_port = dst_port
         elif pkt_dir == PKT_DIR_OUTGOING:
             dir_str = 'outgoing'
             ext_addr = dst_ip
             ext_port = dst_port
             self.send_interface = self.iface_ext
+            in_addr = src_ip
+            in_port = src_port
 
         if pkt_type == ICMP:                    #handle type instead of port for ICMP
             ext_port, = struct.unpack('!B', pkt[transport_header_offset])
@@ -70,21 +82,88 @@ class Firewall:
 
             #DNS packet processing     
             if dir_str == 'outgoing' and pkt_type == UDP and dst_port == 53:
-            
-            
-
-                
-                
-                is_valid_dns, last_verdict = self.handle_DNS(pkt[transport_header_offset:])
-                print is_valid_dns, last_verdict
+                is_valid_dns, last_verdict, qtype = self.handle_DNS(pkt[transport_header_offset:])
+                #print is_valid_dns, last_verdict
                 if is_valid_dns and last_verdict == 'pass':
                     self.send_interface.send_ip_packet(pkt)
                     return
                 if is_valid_dns and last_verdict == 'deny':
-                #test
-                    kitties = self.build_IP_packet(pkt, self.build_UDP_packet(pkt[20:]))
-                    self.iface_int.send_ip_packet(kitties)
+                    if qtype == 1:
+                        kitties = self.build_IP_packet(pkt, self.build_UDP_packet(pkt[20:]))
+                        self.iface_int.send_ip_packet(kitties)
                     return
+                    
+            #TCP packets processing
+            if pkt_type == TCP:
+                pass
+
+
+
+
+            #HTTP packets processing
+            if pkt_type == TCP and ext_port == 80:                   # only ext HTTP server 
+                # store outgoing from VM syn requests   1 handshake
+                if (not is_ack_flag) and is_syn_flag and pkt_dir == PKT_DIR_OUTGOING: 
+                    TCPrequest = Connection(dst_ip, src_ip, dst_port, src_port)
+                    TCPrequest.sender_seqno, = struct.unpack('!L', pkt[transport_header_offset + 4: transport_header_offset + 8]) #1000
+                    self.TCPrequests.append(TCPrequest)
+                    print 'SYN ', TCPrequest.sender_seqno
+                    
+                # establish TCP connections             2 handshake
+                if is_ack_flag and is_syn_flag and pkt_dir == PKT_DIR_INCOMING:
+                    TCPresponse = Connection(src_ip, dst_ip, src_port, dst_port)
+                    if TCPresponse in self.TCPrequests:
+                        i = self.TCPrequests.index(TCPresponse)
+                        TCPresponse.receiver_seqno, = struct.unpack('!L', pkt[transport_header_offset + 4: transport_header_offset + 8])#2000
+                        TCPresponse.sender_seqno, = struct.unpack('!L', pkt[transport_header_offset + 8: transport_header_offset + 12]) #1001
+                        print 'SYN + ACK ', TCPresponse.receiver_seqno, ' + ', TCPresponse.sender_seqno
+                        if self.TCPrequests[i].sender_seqno + 1 == TCPresponse.sender_seqno: 
+                            self.TCPresponses.append(TCPresponse)
+                            self.TCPrequests.pop[i]
+                            
+                        
+                            
+                # process data           
+                if is_ack_flag and not is_syn_flag and pkt_dir == PKT_DIR_OUTGOING: 
+                    TCP_pkt = Connection(dst_ip, src_ip, dst_port, src_port)
+                    TCP_pkt.sender_seqno, = struct.unpack('!L', pkt[transport_header_offset + 4: transport_header_offset + 8])   #1001
+                    TCP_pkt.receiver_seqno, = struct.unpack('!L', pkt[transport_header_offset + 8: transport_header_offset + 12])#2001
+                    print 'about to establish ', TCP_pkt.sender_seqno , ' + ', TCP_pkt.receiver_seqno
+                    if TCP_pkt in self.TCPresponses:
+                        i = self.TCPresponses.index(TCP_pkt)
+                        if self.TCPresponses[i].sender_seqno == TCP_pkt.sender_seqno and self.TCPresponses[i].receiver_seqno + 1 == TCP_pkt.receiver_seqno:
+                            self.TCPconnections.append(TCP_pkt)
+                            self.TCPresponses.pop(i)
+                    if TCP_pkt in self.TCPconnections:
+                        i = self.TCPconnections.index(TCP_pkt)
+                        if self.TCPconnections[i].sender_seqno == TCP_pkt.sender_seqno and self.TCPconnections[i].receiver_seqno == TCP_pkt.receiver_seqno:
+                            payload = pkt[tcp_payload_offset:]
+                            self.TCPconnections[i].stream += payload
+                            self.process_stream(TCPconnections[i])
+                            self.TCPconnections[i].sender_seqno += len(payload)     #1006
+                        if is_fin_flag:                                     # dirty early termination
+                            self.TCPconnections.pop(i)
+                        
+                if is_ack_flag and not is_syn_flag and pkt_dir == PKT_DIR_INCOMING: 
+                    TCP_pkt = Connection(src_ip, dst_ip, src_port, dst_port)
+                    TCP_pkt.receiver_seqno, = struct.unpack('!L', pkt[transport_header_offset + 4: transport_header_offset + 8]) #2001
+                    TCP_pkt.sender_seqno, = struct.unpack('!L', pkt[transport_header_offset + 8: transport_header_offset + 12])#1006
+                    if TCP_pkt in self.TCPconnections:
+                        i = self.TCPconnections.index(TCP_pkt)
+                        if self.TCPconnections[i].sender_seqno == TCP_pkt.sender_seqno and self.TCPconnections[i].receiver_seqno == TCP_pkt.receiver_seqno:
+                            payload = pkt[tcp_payload_offset:]
+                            self.TCPconnections[i].stream += payload
+                            self.process_stream(TCPconnections[i])
+                            self.TCPconnections[i].receiver_seqno += len(payload)     #1006                        
+                        if is_fin_flag:                                         # dirty early termination
+                            self.TCPconnections.pop(i)
+            
+            
+            
+            
+            
+            
+            
             # check rules no DNS        
             for rule in self.rules_dict[protocol]:       
                 v = self.apply_rule(rule, ext_addr, ext_port);
@@ -166,15 +245,11 @@ class Firewall:
         r = domains.split('.')
         a.reverse()
         r.reverse()
-        print a
-        print r
         if len(a) < len(r):
             return False
         i = 0
         while i < len(r) and r != '*':
             if a[i] != r[i] and r[i] != '*':
-                print a[i]
-                print r[i]
                 return False
             i += 1
 
@@ -221,22 +296,19 @@ class Firewall:
             qtype, = struct.unpack('!H', qtype)
             qclass = dns_pkt[rr_type_offset +2 : rr_type_offset +4]
             qclass, = struct.unpack('!H', qclass)
+            
             if (qtype == 1 or qtype == 28) and qclass == 1:
                 is_valid_dns = True                
                 qname = dns_pkt[ : rr_type_offset ]
                 for dns_rule in self.rules_dict["dns"]:
-                    #print dns_rule
                     if dns_rule[1] == 'dns':
-                        if dns_rule[2] == '*':
-                            verdict = dns_rule[0]
-                            continue
                         if self.compare_domains(qname, dns_rule[2]):
                             verdict = dns_rule[0]
                     if dns_rule[1] == 'udp': 
                         v = self.apply_rule(dns_rule, ext_addr, ext_port);
                         if v:
                             verdict = v;
-        return is_valid_dns, verdict
+        return is_valid_dns, verdict, qtype
         
     def parse_http(self, pkt):
         pass
@@ -328,3 +400,32 @@ def my_checksum(buf, sum=0):
     while (sum >> 16) > 0:
         sum = (sum & 0xFFFF) + (sum >> 16)        
     return ~sum & 0xFFFF            # one's complement the result
+
+class Connection:
+    def __init__(self, ext_addr, in_addr, ext_port, in_port):
+        self.ext_addr = ext_addr
+        self.in_addr = in_addr
+        self.ext_port = ext_port
+        self.in_port = in_port
+
+        self.request_data = ''
+        self.response_data  = ''
+        self.stream = ''
+
+        self.sender_seqno = None
+        self.receiver_seqno = None
+        
+    def __eq__(self, other):
+        if self.ext_addr == other.ext_addr and self.in_addr == other.in_addr \
+            and self.ext_port == other.ext_port and self.in_port == other.in_port:
+            return True
+        else:
+            return False
+            
+    def __str__(self):
+        return "Connection: ext " + str(self.ext_addr) + ":" + str(self.ext_port) + " int " + str(self.in_addr) +\
+        ":" + str(self.in_port) + "\n sender # " + str(self.sender_seqno) + " rec # " + str(self.receiver_seqno) +\
+        "\n Stream: " + self.stream
+        
+    __repr__ = __str__
+        
