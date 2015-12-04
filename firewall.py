@@ -152,62 +152,113 @@ class Firewall:
                 return True, qname
         return False, None
 
+    # def deny_tcp(self, pkt, transport_offset):
+    #     # Set flags in header, compute TCP checksum
+    #     # Switch dst and src ip, compute ipv4 checksum
+
+    #     # TCP steps: switch src and dst ports, copy seqno
+    #     # copy ackno + 1, set header length to 20, set RST flag
+    #     # copy all other fields, then compute checksum
+
+    #     ip_header = self.build_IP_packet(pkt, pkt[transport_offset: transport_offset + 20]) #hack to get len(payload) = 40
+
+    #     src_port = pkt[transport_offset: transport_offset + 2]
+    #     dst_port = pkt[transport_offset + 2: transport_offset + 4]
+    #     src_port, = struct.unpack('!H', src_port)
+    #     dst_port, = struct.unpack('!H', dst_port)
+    #     src_port, dst_port = dst_port, src_port
+    #     print "Source Port: ", src_port
+    #     print "Dest Port: ", dst_port
+    #     src_port = struct.pack('!H', src_port)
+    #     dst_port = struct.pack('!H', dst_port)     
+    #     seqno, = struct.unpack('!L', pkt[transport_offset + 4: transport_offset + 8])
+    #     ackno, = struct.unpack('!L', pkt[transport_offset+8:transport_offset+12])
+    #     ackno = seqno + 1
+    #     print "Sequence Number: ", seqno
+    #     print "Ackno: ", ackno
+    #     seqno = struct.pack('!L', seqno)
+    #     ackno = struct.pack('!L', ackno)
+    #     header_length, = struct.unpack('!B', pkt[transport_offset + 12])
+    #     header_length = 0x50
+    #     print "Header Length: ", header_length
+    #     header_length = struct.pack('!B', header_length)
+    #     ack_flag = 0x10
+    #     rst_flag = 0x04
+    #     flags, = struct.unpack('!B', pkt[transport_offset + 13])
+    #     flags = rst_flag + ack_flag
+    #     print "Flags: ", hex(flags)
+    #     flags = struct.pack('!B', flags)
+    #     zero_checksum = struct.pack('!H', 0)
+
+    #     tcp_header = src_port + dst_port + seqno + ackno + header_length + flags + struct.pack('!H', 0) + \
+    #                  zero_checksum + struct.pack('!H', 0)
+
+    #     src_addr = ip_header[12:16]
+    #     dst_addr = ip_header[16:20]
+    #     print "Source Address: ", socket.inet_ntoa(src_addr)
+    #     print "Dest Address: ", socket.inet_ntoa(dst_addr)
+    #     zero_bits = struct.pack('!B', 0)
+    #     protocol = struct.pack('!B', 6)
+    #     tcp_length = struct.pack('!H', 20)
+    #     pseudo_header = src_addr + dst_addr + zero_bits + protocol + tcp_length    
+
+    #     rst_checksum = checksum(pseudo_header + tcp_header)
+    #     rst_checksum = struct.pack('!H', rst_checksum)
+
+    #     rst_tcp_header = src_port + dst_port + seqno + ackno + header_length + flags + struct.pack('!H', 0)+ \
+    #                      rst_checksum + struct.pack('!H', 0)
+    #     return ip_header + rst_tcp_header
+
     def deny_tcp(self, pkt, transport_offset):
-        # Set flags in header, compute TCP checksum
-        # Switch dst and src ip, compute ipv4 checksum
+        ip_header = self.build_IP_packet(pkt, None)
 
-        # TCP steps: switch src and dst ports, copy seqno
-        # copy ackno + 1, set header length to 20, set RST flag
-        # copy all other fields, then compute checksum
+        """
+        Pseudo Header
+        ---------------
 
-        ip_header = self.build_IP_packet(pkt, pkt[transport_offset: transport_offset + 20]) #hack to get len(payload) = 40
+        Source Address (32)
+        Destination Address (32)
+        Reserved (8) | Protocol (8) | TCP Segment Length (16)
 
-        src_port = pkt[transport_offset: transport_offset + 2]
-        dst_port = pkt[transport_offset + 2: transport_offset + 4]
-        src_port, = struct.unpack('!H', src_port)
-        dst_port, = struct.unpack('!H', dst_port)
-        src_port, dst_port = dst_port, src_port
-        print "Source Port: ", src_port
-        print "Dest Port: ", dst_port
-        src_port = struct.pack('!H', src_port)
-        dst_port = struct.pack('!H', dst_port)     
-        seqno, = struct.unpack('!L', pkt[transport_offset + 4: transport_offset + 8])
-        ackno, = struct.unpack('!L', pkt[transport_offset+8:transport_offset+12])
-        ackno = seqno + 1
-        print "Sequence Number: ", seqno
-        print "Ackno: ", ackno
-        seqno = struct.pack('!L', seqno)
-        ackno = struct.pack('!L', ackno)
-        header_length, = struct.unpack('!B', pkt[transport_offset + 12])
-        header_length = 0x50
-        print "Header Length: ", header_length
-        header_length = struct.pack('!B', header_length)
-        ack_flag = 0x10
-        rst_flag = 0x04
-        flags, = struct.unpack('!B', pkt[transport_offset + 13])
-        flags = rst_flag + ack_flag
-        print "Flags: ", hex(flags)
-        flags = struct.pack('!B', flags)
-        zero_checksum = struct.pack('!H', 0)
-
-        tcp_header = src_port + dst_port + seqno + ackno + header_length + flags + struct.pack('!H', 0) + \
-                     zero_checksum + struct.pack('!H', 0)
-
+        """
         src_addr = ip_header[12:16]
         dst_addr = ip_header[16:20]
-        print "Source Address: ", socket.inet_ntoa(src_addr)
-        print "Dest Address: ", socket.inet_ntoa(dst_addr)
-        zero_bits = struct.pack('!B', 0)
+        reserved = struct.pack('!B', 0)
         protocol = struct.pack('!B', 6)
         tcp_length = struct.pack('!H', 20)
-        pseudo_header = src_addr + dst_addr + zero_bits + protocol + tcp_length    
+        pseudo_header = src_addr + dst_addr + reserved + protocol + tcp_length
 
+        """
+        TCP packet
+        Src port (16) | Dst Port (16)
+        Seqno (32)
+        Ackno (32)
+        Data offset(4) | Reserved (6) | Flags (6) | Window (16)
+        Checksum (16) | Urgent Pointer (16)
+        """
+        src_port = pkt[transport_offset + 2 : transport_offset + 4]
+        dst_port = pkt[transport_offset : transport_offset + 2]
+        seqno, = struct.unpack('!L', pkt[transport_offset + 4: transport_offset + 8])
+        ackno = seqno + 1
+        offset_reserved_flags = 0x5014
+        seqno = struct.pack('!L', seqno)
+        ackno = struct.pack('!L', ackno)
+        offset_reserved_flags = struct.pack('!H', offset_reserved_flags)
+        window = struct.pack('!H', 0)
+        zero_checksum = struct.pack('!H', 0)
+        urgent_pointer = struct.pack('!H', 0)
+
+        tcp_header = src_port + dst_port + seqno + ackno + offset_reserved_flags + window + zero_checksum + urgent_pointer
         rst_checksum = checksum(pseudo_header + tcp_header)
         rst_checksum = struct.pack('!H', rst_checksum)
 
-        rst_tcp_header = src_port + dst_port + seqno + ackno + header_length + flags + struct.pack('!H', 0)+ \
-                         rst_checksum + struct.pack('!H', 0)
+        rst_tcp_header = src_port + dst_port + seqno + ackno + offset_reserved_flags + window + \
+                         rst_checksum + urgent_pointer
         return ip_header + rst_tcp_header
+
+
+
+
 
     def deny_dns(self, pkt, transport_offset):
 
