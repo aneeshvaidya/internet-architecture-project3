@@ -353,7 +353,45 @@ class Firewall:
         print host, method, path, version, status, cont_len              
             
     def deny_tcp(pkt, transport_header_offset):
-        pass
+        ip_header = self.build_IP_packet(pkt, None)
+        """
+        Pseudo Header
+        ---------------
+        Source Address (32)
+        Destination Address (32)
+        Reserved (8) | Protocol (8) | TCP Segment Length (16)
+        """
+        src_addr = ip_header[12:16]
+        dst_addr = ip_header[16:20]
+        reserved = struct.pack('!B', 0)
+        protocol = struct.pack('!B', 6)
+        tcp_length = struct.pack('!H', 20)
+        pseudo_header = src_addr + dst_addr + reserved + protocol + tcp_length
+        """
+        TCP packet
+        Src port (16) | Dst Port (16)
+        Seqno (32)
+        Ackno (32)
+        Data offset(4) | Reserved (6) | Flags (6) | Window (16)
+        Checksum (16) | Urgent Pointer (16)
+        """
+        src_port = pkt[transport_offset + 2 : transport_offset + 4]
+        dst_port = pkt[transport_offset : transport_offset + 2]
+        seqno, = struct.unpack('!L', pkt[transport_offset + 4: transport_offset + 8])
+        ackno = seqno + 1
+        offset_reserved_flags = 0x5014
+        seqno = struct.pack('!L', seqno)
+        ackno = struct.pack('!L', ackno)
+        offset_reserved_flags = struct.pack('!H', offset_reserved_flags)
+        window = struct.pack('!H', 0)
+        zero_checksum = struct.pack('!H', 0)
+        urgent_pointer = struct.pack('!H', 0)
+        tcp_header = src_port + dst_port + seqno + ackno + offset_reserved_flags + window + zero_checksum + urgent_pointer
+        rst_checksum = checksum(pseudo_header + tcp_header)
+        rst_checksum = struct.pack('!H', rst_checksum)
+        rst_tcp_header = src_port + dst_port + seqno + ackno + offset_reserved_flags + window + \
+        rst_checksum + urgent_pointer
+        return ip_header + rst_tcp_header
         
         
         
