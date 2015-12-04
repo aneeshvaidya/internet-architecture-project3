@@ -137,32 +137,37 @@ class Firewall:
                             print "\n####   connection established    ####", TCP_pkt
                     if TCP_pkt in self.TCPconnections:
                         i = self.TCPconnections.index(TCP_pkt)
-                        print 'TCP outgoing ', TCP_pkt
-                        print "Dic ", self.TCPconnections, self.TCPconnections[0].stream
+                        #print 'TCP outgoing ', TCP_pkt
+                        #print "Dic ", self.TCPconnections, self.TCPconnections[0].stream
                         
                         if self.TCPconnections[i].sender_seqno == TCP_pkt.sender_seqno and self.TCPconnections[i].receiver_seqno == TCP_pkt.receiver_seqno:
                             
                             payload = pkt[transport_header_offset + tcp_payload_offset:]
-                            self.TCPconnections[i].stream += payload
-                            self.process_stream(self.TCPconnections[i])
+                            self.TCPconnections[i].stream += payload.lower()
+                            
                             self.TCPconnections[i].sender_seqno += len(payload)     #1006
-                            print "payload = ",len(payload), tcp_payload_offset
+                            #print "payload = ", payload
                         if is_fin_flag:                                     # dirty early termination
+                            #print self.TCPconnections[0].stream
+                            self.process_stream(self.TCPconnections[i])
                             self.TCPconnections.remove(TCP_pkt)
                         
                 if is_ack_flag and not is_syn_flag and pkt_dir == PKT_DIR_INCOMING: 
                     TCP_pkt = Connection(src_ip, dst_ip, src_port, dst_port)
                     TCP_pkt.receiver_seqno, = struct.unpack('!L', pkt[transport_header_offset + 4: transport_header_offset + 8]) #2001
                     TCP_pkt.sender_seqno, = struct.unpack('!L', pkt[transport_header_offset + 8: transport_header_offset + 12])#1006
-                    print 'TCP incoming ', TCP_pkt
+                    #print 'TCP incoming ', TCP_pkt
                     if TCP_pkt in self.TCPconnections:
                         i = self.TCPconnections.index(TCP_pkt)
                         if self.TCPconnections[i].sender_seqno == TCP_pkt.sender_seqno and self.TCPconnections[i].receiver_seqno == TCP_pkt.receiver_seqno:
                             payload = pkt[transport_header_offset + tcp_payload_offset:]
-                            self.TCPconnections[i].stream += payload
-                            self.process_stream(self.TCPconnections[i])
+                            self.TCPconnections[i].stream += payload.lower()
+                            #print "payload = ", payload
+                            
                             self.TCPconnections[i].receiver_seqno += len(payload)     #1006                        
                         if is_fin_flag:                                         # dirty early termination
+                            #print self.TCPconnections[0].stream
+                            self.process_stream(self.TCPconnections[i])
                             self.TCPconnections.remove(TCP_pkt)
             
             
@@ -246,9 +251,9 @@ class Firewall:
     
     # www.cafe3.peets.com
     # *.peets.com
-    # qname in dns name format, domains is line from rules file (string)
+    # qname list, domains is line from rules file (string)
     def compare_domains(self, qname, domains):
-        a = self.parse_name(qname)
+        a = qname
         r = domains.split('.')
         a.reverse()
         r.reverse()
@@ -309,7 +314,7 @@ class Firewall:
                 qname = dns_pkt[ : rr_type_offset ]
                 for dns_rule in self.rules_dict["dns"]:
                     if dns_rule[1] == 'dns':
-                        if self.compare_domains(qname, dns_rule[2]):
+                        if self.compare_domains(self.parse_name(qname), dns_rule[2]):
                             verdict = dns_rule[0]
                     if dns_rule[1] == 'udp': 
                         v = self.apply_rule(dns_rule, ext_addr, ext_port);
@@ -317,11 +322,33 @@ class Firewall:
                             verdict = v;
         return is_valid_dns, verdict, qtype
         
-    def parse_http(self, pkt):
-        pass
-        
     def process_stream(self, con):
-        pass
+        stream = con.stream.split("\r\n")
+        for line in stream:
+            print line
+            if "host:" in line:
+                host = line.split()
+                host = host[1]
+            if "content-length:" in line:
+                cont_len = line.split()
+                cont_len = cont_len[1]
+            if "http/1.1" in line:
+                req = line.split()
+                if req[0] == "http/1.1":
+                    status = req[1]
+        if host:
+            for rule in self.rules_dict["http"]:
+                if self.compare_domains(host, rule[2]):
+                    req = stream[0].split()
+                    method = req[0]
+                    path = req[1]
+                    version = req[2]
+                    
+
+                    log.write(host, method, path, version, status, cont_len)
+        print host, method, path, version, status, cont_len              
+            
+
         
         
         
