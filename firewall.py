@@ -160,7 +160,7 @@ class Firewall:
         # copy ackno + 1, set header length to 20, set RST flag
         # copy all other fields, then compute checksum
 
-        ip_header = self.build_IP_packet(pkt, pkt[transport_offset: transport_offset + 40]) #hack to get len(payload) = 40
+        ip_header = self.build_IP_packet(pkt, pkt[transport_offset: transport_offset + 20]) #hack to get len(payload) = 40
 
         src_port = pkt[transport_offset: transport_offset + 2]
         dst_port = pkt[transport_offset + 2: transport_offset + 4]
@@ -171,17 +171,13 @@ class Firewall:
         print "Dest Port: ", dst_port
         src_port = struct.pack('!H', src_port)
         dst_port = struct.pack('!H', dst_port)     
-        tcp_header_length, = struct.unpack('!B', pkt[transport_offset + 12])
-        tcp_header_length = tcp_header_length >> 4
-        seqno, = struct.unpack('!I', pkt[transport_offset + 4: transport_offset + 8])
-        ackno, = struct.unpack('!I', pkt[transport_offset+8:transport_offset+12])
-        seqno = ackno
-        ackno = 0
-
+        seqno, = struct.unpack('!L', pkt[transport_offset + 4: transport_offset + 8])
+        ackno, = struct.unpack('!L', pkt[transport_offset+8:transport_offset+12])
+        ackno = seqno + 1
         print "Sequence Number: ", seqno
         print "Ackno: ", ackno
-        seqno = struct.pack('!I', seqno)
-        ackno = struct.pack('!I', ackno)
+        seqno = struct.pack('!L', seqno)
+        ackno = struct.pack('!L', ackno)
         header_length, = struct.unpack('!B', pkt[transport_offset + 12])
         header_length = 0x50
         print "Header Length: ", header_length
@@ -189,11 +185,10 @@ class Firewall:
         ack_flag = 0x10
         rst_flag = 0x04
         flags, = struct.unpack('!B', pkt[transport_offset + 13])
-        flags = ack_flag + rst_flag
+        flags = rst_flag + ack_flag
         print "Flags: ", hex(flags)
         flags = struct.pack('!B', flags)
         zero_checksum = struct.pack('!H', 0)
-        print type(zero_checksum)
 
         tcp_header = src_port + dst_port + seqno + ackno + header_length + flags + struct.pack('!H', 0) + \
                      zero_checksum + struct.pack('!H', 0)
@@ -241,8 +236,8 @@ class Firewall:
         return ret
 
     def build_IP_packet(self, pkt, payload):
-        packet = pkt[:2]
-        packet += struct.pack('!H', len(payload) + 20)
+        packet = struct.pack('!B', 0x45) + pkt[1]
+        packet += struct.pack('!H', 40)
         packet += pkt[4:6]
         packet += pkt[6:8]
         packet += pkt[8:10]
