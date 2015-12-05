@@ -121,10 +121,13 @@ class Firewall:
                         i = self.TCPrequests.index(TCPresponse)
                         TCPresponse.receiver_seqno, = struct.unpack('!L', pkt[transport_header_offset + 4: transport_header_offset + 8])#2000
                         TCPresponse.sender_seqno, = struct.unpack('!L', pkt[transport_header_offset + 8: transport_header_offset + 12]) #1001
-                        #print 'SYN + ACK ', TCPresponse
+                        #drop the packet if it is out of order
+                        if self.TCPrequests[i].sender_seqno + 1 < TCPresponse.sender_seqno:
+                            return                        
                         if self.TCPrequests[i].sender_seqno + 1 == TCPresponse.sender_seqno: 
                             self.TCPresponses.append(TCPresponse)
                             self.TCPrequests.remove(TCPresponse)
+
                             
                         
                             
@@ -136,26 +139,32 @@ class Firewall:
                     
                     if TCP_pkt in self.TCPresponses:
                         i = self.TCPresponses.index(TCP_pkt)
+                        # drop out of order packet
+                        if self.TCPresponses[i].sender_seqno < TCP_pkt.sender_seqno or self.TCPresponses[i].receiver_seqno + 1 < TCP_pkt.receiver_seqno:
+                            return
                         if self.TCPresponses[i].sender_seqno == TCP_pkt.sender_seqno and self.TCPresponses[i].receiver_seqno + 1 == TCP_pkt.receiver_seqno:
                             self.TCPconnections.append(TCP_pkt)
                             self.TCPresponses.remove(TCP_pkt)
-                            print "\n####   connection established    ####", TCP_pkt
+                            #print "\n####   connection established    ####  to ", src_port
+
                     if TCP_pkt in self.TCPconnections:
-                        i = self.TCPconnections.index(TCP_pkt)
-                        #print 'TCP outgoing ', TCP_pkt
-                        #print "Dic ", self.TCPconnections, self.TCPconnections[0].stream
-                        
+                        i = self.TCPconnections.index(TCP_pkt)                        
                         if self.TCPconnections[i].sender_seqno == TCP_pkt.sender_seqno and self.TCPconnections[i].receiver_seqno == TCP_pkt.receiver_seqno:
-                            
                             payload = pkt[transport_header_offset + tcp_payload_offset:]
                             self.TCPconnections[i].stream += payload.lower()
-                            
                             self.TCPconnections[i].sender_seqno += len(payload)     #1006
+                            if "\r\n\r\n" in payload:
+                                self.process_stream(self.TCPconnections[i])
                             #print "payload = ", payload
+                        #drop out of order packet                            
+                        if self.TCPconnections[i].sender_seqno < TCP_pkt.sender_seqno or self.TCPconnections[i].receiver_seqno < TCP_pkt.receiver_seqno:
+                            return                            
                         if is_fin_flag:                                     # dirty early termination
                             #print self.TCPconnections[0].stream
                             self.process_stream(self.TCPconnections[i])
                             self.TCPconnections.remove(TCP_pkt)
+
+
                         
                 if is_ack_flag and not is_syn_flag and pkt_dir == PKT_DIR_INCOMING: 
                     TCP_pkt = Connection(src_ip, dst_ip, src_port, dst_port)
@@ -168,12 +177,17 @@ class Firewall:
                             payload = pkt[transport_header_offset + tcp_payload_offset:]
                             self.TCPconnections[i].stream += payload.lower()
                             #print "payload = ", payload
-                            
-                            self.TCPconnections[i].receiver_seqno += len(payload)     #1006                        
+                            self.TCPconnections[i].receiver_seqno += len(payload)     #1006 
+                            if "\r\n\r\n" in payload:
+                                self.process_stream(self.TCPconnections[i])       
+                        # drop out of order packet
+                        if self.TCPconnections[i].sender_seqno < TCP_pkt.sender_seqno or self.TCPconnections[i].receiver_seqno < TCP_pkt.receiver_seqno:
+                            return                                
                         if is_fin_flag:                                         # dirty early termination
                             #print self.TCPconnections[0].stream
                             self.process_stream(self.TCPconnections[i])
                             self.TCPconnections.remove(TCP_pkt)
+
             
             
             
@@ -258,11 +272,8 @@ class Firewall:
     # *.peets.com
     # qname list, domains is line from rules file (string)
     def compare_domains(self, qname, domains):        
-        a = qname.split('.')
+        a = qname[::-1]
         r = domains.split('.')
-        print a
-        print r
-        a = a[::-1]
         r = r[::-1]
         if len(a) < len(r):
             return False
@@ -298,7 +309,7 @@ class Firewall:
                 if rule_line[1] == "udp":
                     self.rules_dict["dns"].append(rule_line)
             rule_line = rules.readline()
-        print self.rules_dict  
+        #print self.rules_dict  
 
     def handle_DNS(self, pkt):
         is_valid_dns = False
@@ -329,32 +340,69 @@ class Firewall:
         return is_valid_dns, verdict, qtype
         
     def process_stream(self, con):
-        stream = con.stream.split("\r\n")
-        for line in stream:
-            print line
-            if "host:" in line:
-                host = line.split()
-                host = host[1]
-            if "content-length:" in line:
-                cont_len = line.split()
-                cont_len = cont_len[1]
-            if "http/1.1" in line:
-                req = line.split()
-                if req[0] == "http/1.1":
-                    status = req[1]
-        if host:
+        i = con.stream.find("\r\n\r\n")
+        chunk = con.stream[:i]
+        con.stream = con.stream[i+4:]
+        #pdb.set_trace() 
+        # body
+        if len(chunk) < 4: 
+            #print "empty to ", con.in_port
+            return        
+
+        # response
+        elif chunk[:4] == "http":
+            #print " Response to ", con.in_port, "len = " ,len(chunk)
+            stream = con.request_data + chunk
+            #print chunk
+            con.request_data = ''
+            stream = stream.split("\r\n")
+            
+            status = chunk[9:12]
+            cont_len = "-1"
+            host = con.ext_addr
+            req = stream[0].split()
+            method = req[0].upper()
+            path = req[1]
+            version = req[2].upper()
+            
+            for line in stream:
+                #print line
+                if "host:" in line:
+                    host = line.split()
+                    host = host[1]
+                if "content-length:" in line:
+                    cont_len = line.split()
+                    cont_len = cont_len[1]
+                        
+            write_line = host + ' ' + method + ' ' + path + ' ' + version + ' ' + status + ' ' + cont_len + '\n'
+            #print write_line
+            
             for rule in self.rules_dict["http"]:
-                print rule
-                if self.compare_domains(host, rule[2]):
-                    req = stream[0].split()
-                    method = req[0]
-                    path = req[1]
-                    version = req[2]
-                    print "In process stream...."
-                    print host, method, path, version, status, cont_len   
-                    write_line = host + ' ' + method + ' ' + path + ' ' + version + ' ' + status + ' ' + cont_len
-                    print write_line
-                    self.log.write(write_line)
+                if host == con.ext_addr:
+                    if self.check_address(host, rule[2]) or rule[2] == '*':
+                        self.log.write(write_line)
+                        self.log.flush()
+                        break
+                else: 
+                    if self.compare_domains(host.split('.'), rule[2]):
+                        self.log.write(write_line)
+                        self.log.flush()
+                        break
+        
+        
+
+        # request
+        elif chunk[:4] in ["opti", "get ", "head", "post", "put ", "dele", "trac", "conn"]:
+            #print " Request from ", con.in_port, "len = " ,len(chunk)
+            con.request_data = chunk
+            return
+        else:
+            #print "body to ", con.in_port, "len = " ,len(chunk)
+            return     
+
+
+
+
                               
             
     def deny_tcp(pkt, transport_header_offset):
