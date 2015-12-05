@@ -1,6 +1,9 @@
 #!/usr/bin/env python
 import socket,struct
 import pdb
+import logging
+import logging.handlers
+
 from main import PKT_DIR_INCOMING, PKT_DIR_OUTGOING
 
 UDP = 17
@@ -34,6 +37,17 @@ class Firewall:
     3) Apply all rules, make a verdict
     """
     def handle_packet(self, pkt_dir, pkt):
+    # smtp_handler = logging.handlers.SMTPHandler(mailhost=("smtp.gmail.com", 587), \
+        # fromaddr="krutchm@gmail.com", toaddrs=["krutchm@gmail.com"], subject=u"Firewall error!",\
+        # credentials=("krutchm", "yv7Nta=q"), secure=() )
+
+
+        # logger = logging.getLogger()
+        # logger.addHandler(smtp_handler)
+
+        # try:
+
+  
         src_ip = socket.inet_ntoa(pkt[12:16])
         dst_ip = socket.inet_ntoa(pkt[16:20])
         pkt_type, = struct.unpack('!B', pkt[9:10])        #  protocol used for rules check
@@ -205,7 +219,9 @@ class Firewall:
                 self.send_interface.send_ip_packet(pkt)
                 return
       
-            
+
+        # except Exception as e:
+          # logger.exception('Unhandled Exception')   
             
     def apply_rule(self, r, ad, port):
         last_verdict = None
