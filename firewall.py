@@ -73,6 +73,7 @@ class Firewall:
             ext_addr = src_ip
             ext_port = src_port
             self.send_interface = self.iface_int
+            self.deny_interface = self.iface_ext
             in_addr = dst_ip
             in_port = dst_port
         elif pkt_dir == PKT_DIR_OUTGOING:
@@ -80,6 +81,7 @@ class Firewall:
             ext_addr = dst_ip
             ext_port = dst_port
             self.send_interface = self.iface_ext
+            self.deny_interface = self.iface_int
             in_addr = src_ip
             in_port = src_port
 
@@ -103,7 +105,7 @@ class Firewall:
                     return
                 if is_valid_dns and last_verdict == 'deny':
                     if qtype == 1:
-                        kitties = self.build_IP_packet(pkt, self.build_UDP_packet(pkt[20:]))
+                        kitties = self.build_IP_packet(pkt, self.build_UDP_packet(pkt[transport_header_offset:]))
                         self.iface_int.send_ip_packet(kitties)
                     return
                     
@@ -111,9 +113,9 @@ class Firewall:
             if pkt_type == TCP:
                 for rule in reversed(self.rules_dict['tcp']):
                     v = self.apply_rule(rule, ext_addr, ext_port)
-                    if v:
-                        rst_packet = self.deny_tcp(deny, transport_header_offset)
-                        self.send_interface.send_ip_packet(rst_packet)
+                    if v == 'deny':
+                        rst_packet = self.build_IP_packet(pkt, self.build_TCP_packet(pkt, pkt[transport_header_offset:]))
+                        self.deny_interface.send_ip_packet(rst_packet)
                         return
 
 
@@ -421,8 +423,8 @@ class Firewall:
 
                               
             
-    def deny_tcp(pkt, transport_header_offset):
-        ip_header = self.build_IP_packet(pkt, None)
+    def deny_tcp(self, pkt, transport_offset):
+
         """
         Pseudo Header
         ---------------
@@ -430,8 +432,8 @@ class Firewall:
         Destination Address (32)
         Reserved (8) | Protocol (8) | TCP Segment Length (16)
         """
-        src_addr = ip_header[12:16]
-        dst_addr = ip_header[16:20]
+        src_addr = pkt[16:20]
+        dst_addr = pkt[12:16]
         reserved = struct.pack('!B', 0)
         protocol = struct.pack('!B', 6)
         tcp_length = struct.pack('!H', 20)
@@ -456,12 +458,49 @@ class Firewall:
         zero_checksum = struct.pack('!H', 0)
         urgent_pointer = struct.pack('!H', 0)
         tcp_header = src_port + dst_port + seqno + ackno + offset_reserved_flags + window + zero_checksum + urgent_pointer
-        rst_checksum = checksum(pseudo_header + tcp_header)
+        rst_checksum = my_checksum(pseudo_header + tcp_header)
         rst_checksum = struct.pack('!H', rst_checksum)
         rst_tcp_header = src_port + dst_port + seqno + ackno + offset_reserved_flags + window + \
         rst_checksum + urgent_pointer
+        
+        ip_header = self.build_IP_packet(pkt, rst_tcp_header)
         return ip_header + rst_tcp_header
         
+        
+    # build TCP RST packet based on incoming TCP packet - pkt
+    def build_TCP_packet(self, ip, tcp):
+        """
+        TCP packet
+        -----------------
+        Src port (16) | Dst Port (16)
+        Seqno (32)
+        Ackno (32)
+        Data offset(4) | Reserved (6) | Flags (6) | Window (16)
+        Checksum (16) | Urgent Pointer (16)
+        """
+        packet = tcp[2:4]               # src_port
+        packet += tcp[0:2]              # dst_port
+        packet += tcp[8:12]              # seqno = tcp ackno
+        seqno, = struct.unpack('!L', tcp[4:8])        
+        packet += struct.pack("!L", seqno+1)  # ackno
+        packet += struct.pack('!H', 0x5014) # offset + flags
+        packet += struct.pack("!H", 0)           # window
+        packet += struct.pack("!L", 0)  # cheksum + urgent
+        """
+        Pseudo Header
+        ---------------
+        Source Address (32)
+        Destination Address (32)
+        Reserved (8) | Protocol (8) | TCP Segment Length (16)
+        """
+        src_addr = ip[16:20] 
+        dst_addr = ip[12:16]
+        protocol = struct.pack('!H', 6)
+        tcp_length = struct.pack('!H', 20)
+        pseudo_header = src_addr + dst_addr + protocol + tcp_length
+        checksum = my_checksum(pseudo_header + packet)
+        packet = packet[:16] + struct.pack("!H", checksum) + packet[18:]
+        return packet
         
         
                             
@@ -488,7 +527,7 @@ class Firewall:
         #packet += struct.pack("!H", 0xC00C)  # pointer to name
         #packet += struct.pack("!H", 1)  # Type
         #packet += struct.pack("!H", 1)  # Class
-        packet += struct.pack("!L", 15)  # TTL
+        packet += struct.pack("!L", 1)  # TTL
         packet += struct.pack("!H", 4)  # RDLENGTH
         packet += socket.inet_aton('169.229.49.130') # RDATA
         return packet
