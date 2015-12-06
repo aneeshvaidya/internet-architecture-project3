@@ -39,7 +39,7 @@ class Firewall:
     def handle_packet(self, pkt_dir, pkt):
     # smtp_handler = logging.handlers.SMTPHandler(mailhost=("smtp.gmail.com", 587), \
         # fromaddr="krutchm@gmail.com", toaddrs=["krutchm@gmail.com"], subject=u"Firewall error!",\
-        # credentials=("krutchm", "yv7Nta=q"), secure=() )
+        # credentials=("      ", "      "), secure=() )
 
 
         # logger = logging.getLogger()
@@ -61,11 +61,7 @@ class Firewall:
        
         ipid, = struct.unpack('!H', pkt[4:6])       # IP identifier (big endian).
         
-        tcp_payload_offset = ((ord(pkt[transport_header_offset + 12])) & 0xf0) >> 2 #already multyplied by 4
-        tcp_flags = ord(pkt[transport_header_offset + 13])
-        is_syn_flag = tcp_flags & 0x2 > 0
-        is_ack_flag = tcp_flags & 0x10 > 0
-        is_fin_flag = tcp_flags & 0x1 > 0
+
 
         
         if pkt_dir == PKT_DIR_INCOMING:
@@ -95,6 +91,11 @@ class Firewall:
         #Thus you should always pass nonTCP/UDP/ICMP packets
         if pkt_type in self.types.keys():
             protocol = self.types[pkt_type]
+            tcp_payload_offset = ((ord(pkt[transport_header_offset + 12])) & 0xf0) >> 2 #already multyplied by 4
+            tcp_flags = ord(pkt[transport_header_offset + 13])
+            is_syn_flag = tcp_flags & 0x2 > 0
+            is_ack_flag = tcp_flags & 0x10 > 0
+            is_fin_flag = tcp_flags & 0x1 > 0
 
             #DNS packet processing     
             if dir_str == 'outgoing' and pkt_type == UDP and dst_port == 53:
@@ -117,9 +118,6 @@ class Firewall:
                         rst_packet = self.build_IP_packet(pkt, self.build_TCP_packet(pkt, pkt[transport_header_offset:]))
                         self.deny_interface.send_ip_packet(rst_packet)
                         return
-
-
-
 
             #HTTP packets processing
             if pkt_type == TCP and ext_port == 80:                   # only ext HTTP server 
@@ -204,13 +202,6 @@ class Firewall:
                             self.process_stream(self.TCPconnections[i])
                             self.TCPconnections.remove(TCP_pkt)
 
-            
-            
-            
-            
-            
-            
-            
             # check rules no DNS        
             for rule in self.rules_dict[protocol]:       
                 v = self.apply_rule(rule, ext_addr, ext_port);
